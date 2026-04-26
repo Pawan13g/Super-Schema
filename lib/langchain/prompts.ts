@@ -83,3 +83,46 @@ export const generateQueryPrompt = ChatPromptTemplate.fromMessages([
     "Schema:\n{schema}\n\nWrite an SQL query for: {question}",
   ],
 ]);
+
+export const optimizeQueryPrompt = ChatPromptTemplate.fromMessages([
+  [
+    "system",
+    [
+      "You are an expert SQL performance engineer. Given a database schema and a SQL query, optimize the query for better performance.",
+      "",
+      "Consider:",
+      "- Adding appropriate index hints",
+      "- Rewriting subqueries as JOINs where beneficial",
+      "- Eliminating unnecessary columns in SELECT",
+      "- Using EXISTS instead of IN for subqueries",
+      "- Proper use of WHERE clause ordering",
+      "",
+      "Return ONLY the optimized SQL query followed by a brief comment explaining each optimization made. Use SQL comments (--) for the explanations.",
+    ].join("\n"),
+  ],
+  [
+    "human",
+    "Schema:\n{schema}\n\nOptimize this query:\n{query}",
+  ],
+]);
+
+export const explainQueryPrompt = ChatPromptTemplate.fromMessages([
+  [
+    "system",
+    [
+      "You are an expert SQL educator. Given a SQL query and a database schema, explain what the query does in plain English.",
+      "",
+      "Your explanation should:",
+      "- Start with a one-sentence summary",
+      "- Break down each clause (SELECT, FROM, JOIN, WHERE, etc.)",
+      "- Explain the data flow step by step",
+      "- Note any performance considerations",
+      "",
+      "Keep the explanation clear and concise.",
+    ].join("\n"),
+  ],
+  [
+    "human",
+    "Schema:\n{schema}\n\nExplain this query:\n{query}",
+  ],
+]);

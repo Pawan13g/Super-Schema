@@ -49,14 +49,15 @@
 
 ## Phase 4: Query Builder & AI Query Generator (Week 7-8)
 
-- [ ] Build visual query builder component
-- [ ] Support visual JOIN construction
-- [ ] Implement `generate_query` tool - natural language to SQL query
-- [ ] Implement `optimize_query` tool - suggest query optimizations
-- [ ] Create API route `/app/api/query/route.ts`
-- [ ] Build query input UI (natural language question to SQL)
-- [ ] Display generated/optimized queries with syntax highlighting
-- [ ] Add query explanation feature (AI explains what a query does)
+- [x] Build query builder panel (tabbed into SQL panel)
+- [ ] Support visual JOIN construction (deferred - complex drag-drop UI)
+- [x] Implement `generate_query` - natural language to SQL query
+- [x] Implement `optimize_query` - suggest query optimizations
+- [x] Implement `explain_query` - AI explains what a query does
+- [x] API route handles all query actions (`/api/ai`)
+- [x] Build query input UI (natural language question to SQL)
+- [x] Display generated/optimized queries with syntax highlighting
+- [x] Add query explanation feature
 
 ## Phase 5: Mock Database System (Week 9-10)
 

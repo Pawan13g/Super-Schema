@@ -4,6 +4,8 @@ import {
   explainSchema,
   fixSchema,
   generateQuery,
+  optimizeQuery,
+  explainQuery,
 } from "@/lib/langchain/ai";
 
 export async function POST(request: NextRequest) {
@@ -37,6 +39,14 @@ export async function POST(request: NextRequest) {
       case "generate_query": {
         const query = await generateQuery(payload.schema, payload.question);
         return Response.json({ result: query });
+      }
+      case "optimize_query": {
+        const optimized = await optimizeQuery(payload.schema, payload.query);
+        return Response.json({ result: optimized });
+      }
+      case "explain_query": {
+        const explanation = await explainQuery(payload.schema, payload.query);
+        return Response.json({ result: explanation });
       }
       default:
         return Response.json(
