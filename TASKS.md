@@ -61,19 +61,19 @@
 
 ## Phase 5: Mock Database System (Week 9-10)
 
-- [ ] Set up SQLite in-memory database for mock execution
-- [ ] Implement `generate_mock_data` tool using faker.js
-- [ ] Build flow: schema -> create tables -> insert mock data -> run query -> show results
-- [ ] Display query results in a table UI
-- [ ] Add safety & validation layer
-  - [ ] Validate SQL syntax before execution
-  - [ ] Prevent destructive queries (DROP, DELETE, TRUNCATE)
-  - [ ] Sandbox execution environment
+- [x] Set up SQLite in-memory database for mock execution
+- [x] Implement `generate_mock_data` tool using faker.js
+- [x] Build flow: schema -> create tables -> insert mock data -> run query -> show results
+- [x] Display query results in a table UI
+- [x] Add safety & validation layer
+  - [x] Validate SQL syntax before execution
+  - [x] Prevent destructive queries (DROP, DELETE, TRUNCATE)
+  - [x] Sandbox execution environment
 
 ## Phase 6: Advanced Features & Polish (Week 11+)
 
-- [ ] Implement "Convert DB" feature (e.g., MySQL to PostgreSQL)
-- [ ] Implement "Generate Backend Models" (Prisma / Sequelize code generation)
+- [x] Implement "Convert DB" feature (e.g., MySQL to PostgreSQL)
+- [x] Implement "Generate Backend Models" (Prisma / Sequelize code generation)
 - [ ] Create schema API route `/app/api/schema/route.ts` for save/load
 - [ ] Save schemas to PostgreSQL via Prisma (user projects/history)
 - [ ] Add user authentication flow (sign up, sign in, session management)

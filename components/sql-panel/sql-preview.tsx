@@ -3,23 +3,30 @@
 import { useMemo, useState } from "react";
 import { useSchema } from "@/lib/schema-store";
 import { generateSql, type SqlDialect } from "@/lib/sql-generator";
+import { generateModels, type ModelTarget } from "@/lib/model-generator";
 import { highlightSql } from "@/lib/sql-highlight";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Copy, Check, Download, FileJson, Code2, Search } from "lucide-react";
+import { Copy, Check, Download, FileJson, Code2, Search, Boxes } from "lucide-react";
 import { QueryPanel } from "./query-panel";
 
 export function SqlPreview() {
   const { schema } = useSchema();
   const [dialect, setDialect] = useState<SqlDialect>("postgresql");
+  const [modelTarget, setModelTarget] = useState<ModelTarget>("prisma");
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState("sql");
 
   const sql = useMemo(() => generateSql(schema, dialect), [schema, dialect]);
+  const models = useMemo(
+    () => generateModels(schema, modelTarget),
+    [schema, modelTarget]
+  );
 
   const handleCopy = async () => {
-    await navigator.clipboard.writeText(sql);
+    const text = activeTab === "models" ? models : sql;
+    await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -46,6 +53,20 @@ export function SqlPreview() {
     URL.revokeObjectURL(url);
   };
 
+  const handleDownloadModels = () => {
+    const filename =
+      modelTarget === "prisma" ? "schema.prisma" : "models.ts";
+    const mime =
+      modelTarget === "prisma" ? "text/plain" : "text/typescript";
+    const blob = new Blob([models], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex h-full flex-col bg-card">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col gap-0">
@@ -55,6 +76,10 @@ export function SqlPreview() {
             <TabsTrigger value="sql" className="text-[10px] px-2 h-5 gap-1">
               <Code2 className="size-3" />
               SQL Output
+            </TabsTrigger>
+            <TabsTrigger value="models" className="text-[10px] px-2 h-5 gap-1">
+              <Boxes className="size-3" />
+              Models
             </TabsTrigger>
             <TabsTrigger value="query" className="text-[10px] px-2 h-5 gap-1">
               <Search className="size-3" />
@@ -111,6 +136,45 @@ export function SqlPreview() {
               </Button>
             </div>
           )}
+
+          {activeTab === "models" && (
+            <div className="flex items-center gap-1">
+              <Tabs
+                value={modelTarget}
+                onValueChange={(val) => setModelTarget(val as ModelTarget)}
+              >
+                <TabsList className="h-6">
+                  <TabsTrigger value="prisma" className="text-[10px] px-2 h-5">
+                    Prisma
+                  </TabsTrigger>
+                  <TabsTrigger value="sequelize" className="text-[10px] px-2 h-5">
+                    Sequelize
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={handleCopy}
+                title="Copy models"
+              >
+                {copied ? (
+                  <Check className="size-3 text-emerald-500" />
+                ) : (
+                  <Copy className="size-3" />
+                )}
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                onClick={handleDownloadModels}
+                title="Download models"
+              >
+                <Download className="size-3" />
+              </Button>
+            </div>
+          )}
         </div>
 
         {/* SQL Output tab */}
@@ -118,6 +182,15 @@ export function SqlPreview() {
           <ScrollArea className="h-full">
             <pre className="p-3 font-mono text-xs leading-relaxed">
               <code>{highlightSql(sql)}</code>
+            </pre>
+          </ScrollArea>
+        </TabsContent>
+
+        {/* Models tab */}
+        <TabsContent value="models" className="flex-1 overflow-hidden">
+          <ScrollArea className="h-full">
+            <pre className="p-3 font-mono text-xs leading-relaxed">
+              <code>{models}</code>
             </pre>
           </ScrollArea>
         </TabsContent>
