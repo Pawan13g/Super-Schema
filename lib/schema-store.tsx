@@ -24,7 +24,14 @@ interface SchemaStore {
   updateColumn: (tableId: string, columnId: string, updates: Partial<Column>) => void;
   addRelation: (relation: Omit<Relation, "id">) => void;
   removeRelation: (relationId: string) => void;
+  createJunctionTable: (
+    sourceTableId: string,
+    sourceColumnId: string,
+    targetTableId: string,
+    targetColumnId: string
+  ) => string | null;
   importAiSchema: (generated: GeneratedSchema) => void;
+  replaceSchema: (next: Schema) => void;
 }
 
 const SchemaContext = createContext<SchemaStore | null>(null);
@@ -152,6 +159,94 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const createJunctionTable = useCallback(
+    (
+      sourceTableId: string,
+      sourceColumnId: string,
+      targetTableId: string,
+      targetColumnId: string
+    ): string | null => {
+      let junctionId: string | null = null;
+      setSchema((prev) => {
+        const sourceTable = prev.tables.find((t) => t.id === sourceTableId);
+        const targetTable = prev.tables.find((t) => t.id === targetTableId);
+        const sourceCol = sourceTable?.columns.find(
+          (c) => c.id === sourceColumnId
+        );
+        const targetCol = targetTable?.columns.find(
+          (c) => c.id === targetColumnId
+        );
+        if (!sourceTable || !targetTable || !sourceCol || !targetCol) {
+          return prev;
+        }
+
+        const junctionTableId = genId("tbl");
+        const sourceFkId = genId("col");
+        const targetFkId = genId("col");
+        junctionId = junctionTableId;
+
+        // Match referenced column types — coerce SERIAL → INT (FK side)
+        const fkType = (refType: ColumnType): ColumnType =>
+          refType === "SERIAL" ? "INT" : refType;
+
+        const junctionTable: Table = {
+          id: junctionTableId,
+          name: `${sourceTable.name}_${targetTable.name}`,
+          color: TABLE_COLORS[prev.tables.length % TABLE_COLORS.length],
+          columns: [
+            {
+              id: sourceFkId,
+              name: `${sourceTable.name}_${sourceCol.name}`,
+              type: fkType(sourceCol.type),
+              constraints: ["PRIMARY KEY", "NOT NULL", "REFERENCES"],
+              references: { table: sourceTable.name, column: sourceCol.name },
+            },
+            {
+              id: targetFkId,
+              name: `${targetTable.name}_${targetCol.name}`,
+              type: fkType(targetCol.type),
+              constraints: ["PRIMARY KEY", "NOT NULL", "REFERENCES"],
+              references: { table: targetTable.name, column: targetCol.name },
+            },
+          ],
+          position: {
+            x:
+              ((sourceTable.position.x ?? 100) +
+                (targetTable.position.x ?? 400)) /
+              2,
+            y:
+              Math.max(sourceTable.position.y ?? 100, targetTable.position.y ?? 100) +
+              260,
+          },
+        };
+
+        const relationToSource: Relation = {
+          id: genId("rel"),
+          sourceTable: junctionTableId,
+          sourceColumn: sourceFkId,
+          targetTable: sourceTableId,
+          targetColumn: sourceColumnId,
+          type: "one-to-many",
+        };
+        const relationToTarget: Relation = {
+          id: genId("rel"),
+          sourceTable: junctionTableId,
+          sourceColumn: targetFkId,
+          targetTable: targetTableId,
+          targetColumn: targetColumnId,
+          type: "one-to-many",
+        };
+
+        return {
+          tables: [...prev.tables, junctionTable],
+          relations: [...prev.relations, relationToSource, relationToTarget],
+        };
+      });
+      return junctionId;
+    },
+    []
+  );
+
   const importAiSchema = useCallback((generated: GeneratedSchema) => {
     const GRID_X = 300;
     const GRID_Y = 250;
@@ -215,6 +310,11 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     setSelectedTableId(null);
   }, []);
 
+  const replaceSchema = useCallback((next: Schema) => {
+    setSchema(next);
+    setSelectedTableId(null);
+  }, []);
+
   return (
     <SchemaContext.Provider
       value={{
@@ -230,7 +330,9 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         updateColumn,
         addRelation,
         removeRelation,
+        createJunctionTable,
         importAiSchema,
+        replaceSchema,
       }}
     >
       {children}

@@ -3,8 +3,8 @@
 ## Phase 1: Project Setup & Foundation (Week 1-2)
 
 - [x] Initialize Next.js project with App Router and TypeScript
-- [ ] Install and configure Prisma ORM with PostgreSQL
-- [ ] Set up NextAuth for authentication
+- [x] Install and configure Prisma ORM with PostgreSQL
+- [x] Set up NextAuth for authentication
 - [x] Install React Flow for canvas UI
 - [x] Define the core schema JSON model (tables, columns, constraints, relations)
 - [x] Create project folder structure (`/app/api`, `/lib/langchain`, `/components/editor`, `/components/canvas`, `/components/query-builder`, `/prisma`)
@@ -74,9 +74,9 @@
 
 - [x] Implement "Convert DB" feature (e.g., MySQL to PostgreSQL)
 - [x] Implement "Generate Backend Models" (Prisma / Sequelize code generation)
-- [ ] Create schema API route `/app/api/schema/route.ts` for save/load
-- [ ] Save schemas to PostgreSQL via Prisma (user projects/history)
-- [ ] Add user authentication flow (sign up, sign in, session management)
+- [x] Create schema API route `/app/api/workspaces/[id]/route.ts` for save/load
+- [x] Save schemas to PostgreSQL via Prisma (workspaces with auto-save)
+- [x] Add user authentication flow (sign up, sign in, session management)
 - [ ] Polish UI/UX across all components
 - [ ] Performance optimization
 - [ ] Error handling and edge cases

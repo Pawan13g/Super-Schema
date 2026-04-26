@@ -5,6 +5,7 @@ import { useSchema } from "@/lib/schema-store";
 import { generateSql, type SqlDialect } from "@/lib/sql-generator";
 import { generateModels, type ModelTarget } from "@/lib/model-generator";
 import { highlightSql } from "@/lib/sql-highlight";
+import { highlightCode } from "@/lib/code-highlight";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -190,7 +191,12 @@ export function SqlPreview() {
         <TabsContent value="models" className="flex-1 overflow-hidden">
           <ScrollArea className="h-full">
             <pre className="p-3 font-mono text-xs leading-relaxed">
-              <code>{models}</code>
+              <code>
+                {highlightCode(
+                  models,
+                  modelTarget === "prisma" ? "prisma" : "typescript"
+                )}
+              </code>
             </pre>
           </ScrollArea>
         </TabsContent>

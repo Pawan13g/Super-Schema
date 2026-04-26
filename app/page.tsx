@@ -1,7 +1,10 @@
 "use client";
 
 import { useState } from "react";
+import { useSession, signOut } from "next-auth/react";
 import { SchemaProvider } from "@/lib/schema-store";
+import { WorkspaceProvider } from "@/lib/workspace-context";
+import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { SchemaCanvas } from "@/components/canvas/schema-canvas";
 import { SchemaSidebar } from "@/components/sidebar/schema-sidebar";
 import { SqlPreview } from "@/components/sql-panel/sql-preview";
@@ -14,14 +17,32 @@ import {
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import {
-  Database,
   PanelLeftClose,
   PanelLeft,
   PanelBottomClose,
   PanelBottomOpen,
   Image as ImageIcon,
   Sparkles,
+  LogOut,
+  User as UserIcon,
 } from "lucide-react";
+
+function BrandLogo() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      className="size-5"
+      aria-hidden="true"
+    >
+      <rect x="2" y="10" width="2.5" height="11" rx="1" fill="#a78bfa" />
+      <rect x="6" y="6" width="2.5" height="15" rx="1" fill="#8b5cf6" />
+      <rect x="10" y="3" width="2.5" height="18" rx="1" fill="#7c3aed" />
+      <rect x="14" y="7" width="2.5" height="14" rx="1" fill="#8b5cf6" />
+      <rect x="18" y="11" width="2.5" height="10" rx="1" fill="#a78bfa" />
+    </svg>
+  );
+}
 import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
 
@@ -54,8 +75,11 @@ function AppNavbar({
           <PanelLeftClose className="size-4" />
         )}
       </Button>
-      <Database className="size-4 text-indigo-600 dark:text-indigo-400" />
+      <BrandLogo />
       <span className="text-sm font-bold tracking-tight">Super Schema</span>
+
+      <div className="mx-3 h-5 w-px bg-border" />
+      <WorkspaceSwitcher />
 
       <nav className="ml-4 flex items-center gap-0.5">
         {["File", "Edit", "View", "Help"].map((item) => (
@@ -102,17 +126,80 @@ function AppNavbar({
           )}
         </Button>
         <ThemeToggle />
+        <UserMenu />
       </div>
     </header>
   );
 }
 
+function UserMenu() {
+  const { data: session } = useSession();
+  const [open, setOpen] = useState(false);
+
+  if (!session?.user) return null;
+
+  const initials = (session.user.name ?? session.user.email ?? "?")
+    .split(/\s+/)
+    .map((p) => p[0])
+    .slice(0, 2)
+    .join("")
+    .toUpperCase();
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex size-7 items-center justify-center rounded-full bg-violet-500/15 text-[10px] font-semibold text-violet-700 hover:bg-violet-500/25 dark:text-violet-300"
+        title={session.user.email ?? "Account"}
+      >
+        {initials}
+      </button>
+      {open && (
+        <>
+          <button
+            className="fixed inset-0 z-10 cursor-default"
+            onClick={() => setOpen(false)}
+            aria-label="close"
+          />
+          <div className="absolute right-0 top-9 z-20 min-w-[200px] rounded-md border bg-popover p-1 shadow-lg">
+            <div className="px-2 py-1.5">
+              <p className="truncate text-xs font-medium">
+                {session.user.name ?? "Anonymous"}
+              </p>
+              <p className="truncate text-[10px] text-muted-foreground">
+                {session.user.email}
+              </p>
+            </div>
+            <div className="my-1 h-px bg-border" />
+            <button
+              disabled
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-muted-foreground"
+            >
+              <UserIcon className="size-3" />
+              Account settings
+            </button>
+            <button
+              onClick={() => signOut({ callbackUrl: "/sign-in" })}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs text-destructive hover:bg-destructive/10"
+            >
+              <LogOut className="size-3" />
+              Sign out
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 function CanvasHeader() {
   return (
-    <div className="flex shrink-0 items-center border-b px-4 py-2">
+    <div className="flex shrink-0 items-center justify-between border-b bg-card/50 px-4 py-2.5">
       <div>
-        <h1 className="text-sm font-semibold">Untitled Database</h1>
-        <p className="text-xs text-muted-foreground">
+        <h1 className="text-sm font-semibold tracking-tight">
+          Untitled Database
+        </h1>
+        <p className="text-[11px] text-muted-foreground">
           Schema design workspace
         </p>
       </div>
@@ -149,6 +236,7 @@ export default function Home() {
 
   return (
     <SchemaProvider>
+      <WorkspaceProvider>
       <div className="flex h-full w-full flex-1 flex-col">
         <AppNavbar
           sidebarCollapsed={sidebarCollapsed}
@@ -210,6 +298,7 @@ export default function Home() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </div>
+      </WorkspaceProvider>
     </SchemaProvider>
   );
 }

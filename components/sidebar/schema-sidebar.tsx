@@ -1,10 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSchema } from "@/lib/schema-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { FkPickerDialog } from "./fk-picker-dialog";
 import {
   Select,
   SelectContent,
@@ -19,14 +21,16 @@ import {
 } from "@/components/ui/collapsible";
 import {
   Plus,
-  Trash2,
   Search,
   ChevronDown,
   MoreHorizontal,
+  GripVertical,
+  Table2,
+  Trash2,
+  Pencil,
 } from "lucide-react";
 import {
   COLUMN_TYPES,
-  COLUMN_CONSTRAINTS,
   type ColumnType,
   type ColumnConstraint,
 } from "@/lib/types";
@@ -38,21 +42,56 @@ export function SchemaSidebar() {
     setSelectedTableId,
     addTable,
     removeTable,
+    updateTableName,
     addColumn,
     removeColumn,
     updateColumn,
   } = useSchema();
 
-  const [newTableName, setNewTableName] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+  const [openMenuTableId, setOpenMenuTableId] = useState<string | null>(null);
+  const [renamingTableId, setRenamingTableId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState("");
+  const [confirmDeleteTableId, setConfirmDeleteTableId] = useState<string | null>(
+    null
+  );
+  const [confirmDeleteColumn, setConfirmDeleteColumn] = useState<{
+    tableId: string;
+    columnId: string;
+  } | null>(null);
+  const [fkPicker, setFkPicker] = useState<{
+    tableId: string;
+    columnId: string;
+  } | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [expandedSections, setExpandedSections] = useState<
     Record<string, { fields: boolean; indexes: boolean; comments: boolean }>
   >({});
 
+  useEffect(() => {
+    if (renamingTableId) {
+      renameInputRef.current?.focus();
+      renameInputRef.current?.select();
+    }
+  }, [renamingTableId]);
+
+  const startRename = (tableId: string, currentName: string) => {
+    setRenamingTableId(tableId);
+    setRenameDraft(currentName);
+  };
+
+  const commitRename = () => {
+    if (renamingTableId) {
+      const next = renameDraft.trim();
+      if (next) updateTableName(renamingTableId, next);
+    }
+    setRenamingTableId(null);
+    setRenameDraft("");
+  };
+
   const handleAddTable = () => {
-    const name = newTableName.trim() || `table_${schema.tables.length + 1}`;
+    const name = `table_${schema.tables.length + 1}`;
     addTable(name);
-    setNewTableName("");
   };
 
   const toggleSection = (
@@ -60,7 +99,8 @@ export function SchemaSidebar() {
     section: "fields" | "indexes" | "comments"
   ) => {
     setExpandedSections((prev) => {
-      const current = prev[tableId] ?? { fields: false, indexes: false, comments: false };
+      const current =
+        prev[tableId] ?? { fields: false, indexes: false, comments: false };
       return {
         ...prev,
         [tableId]: { ...current, [section]: !current[section] },
@@ -74,37 +114,30 @@ export function SchemaSidebar() {
 
   return (
     <div className="flex h-full flex-col bg-card">
-      {/* Tables header + Add button */}
+      {/* Header */}
       <div className="flex items-center justify-between border-b px-4 py-3">
-        <span className="text-sm font-semibold text-foreground">Tables</span>
-        <div className="flex items-center gap-1.5">
-          <Input
-            placeholder="Name..."
-            value={newTableName}
-            onChange={(e) => setNewTableName(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAddTable()}
-            className="h-7 w-24 text-xs"
-          />
-          <Button
-            size="sm"
-            onClick={handleAddTable}
-            className="h-7 gap-1 bg-indigo-600 text-white hover:bg-indigo-700"
-          >
-            <Plus className="size-3" />
-            <span className="text-xs">Add Table</span>
-          </Button>
-        </div>
+        <span className="text-sm font-semibold tracking-tight text-foreground">
+          Tables
+        </span>
+        <Button
+          size="sm"
+          onClick={handleAddTable}
+          className="h-7 gap-1 bg-violet-600 px-2.5 text-white shadow-sm hover:bg-violet-700"
+        >
+          <Plus className="size-3" />
+          <span className="text-xs font-medium">Add Table</span>
+        </Button>
       </div>
 
       {/* Search */}
       <div className="border-b px-3 py-2">
         <div className="relative">
-          <Search className="absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
           <Input
             placeholder="search table"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="h-8 pl-7 text-xs"
+            className="h-8 rounded-md bg-muted/40 pl-8 text-xs"
           />
         </div>
       </div>
@@ -115,7 +148,7 @@ export function SchemaSidebar() {
           {filteredTables.length === 0 && (
             <p className="px-4 py-8 text-center text-xs text-muted-foreground">
               {schema.tables.length === 0
-                ? "No tables yet. Add one above."
+                ? "No tables yet. Click + Add Table."
                 : "No tables match your search."}
             </p>
           )}
@@ -127,56 +160,134 @@ export function SchemaSidebar() {
               indexes: false,
               comments: false,
             };
+            const menuOpen = openMenuTableId === table.id;
 
             return (
-              <div key={table.id} className="border-b last:border-b-0">
+              <div
+                key={table.id}
+                className={`group/table border-b last:border-b-0 ${
+                  isSelected ? "bg-muted/30" : ""
+                }`}
+              >
                 {/* Table row */}
-                <button
-                  onClick={() => {
-                    setSelectedTableId(isSelected ? null : table.id);
-                    if (!isSelected) {
-                      setExpandedSections((prev) => {
-                        const current = prev[table.id];
-                        return {
-                          ...prev,
-                          [table.id]: current ?? { fields: true, indexes: false, comments: false },
-                        };
-                      });
-                    }
-                  }}
-                  className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-muted/50 ${
-                    isSelected ? "bg-muted/50" : ""
-                  }`}
-                >
-                  <div
-                    className="h-4 w-1 shrink-0 rounded-full"
-                    style={{ backgroundColor: table.color }}
+                <div className="relative flex items-center gap-1.5 px-2 py-1.5">
+                  <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/30 transition-colors group-hover/table:text-muted-foreground/70" />
+                  <Table2
+                    className="size-3.5 shrink-0"
+                    style={{ color: table.color }}
                   />
-                  <span className="flex-1 truncate font-medium">
-                    {table.name}
-                  </span>
+                  {renamingTableId === table.id ? (
+                    <Input
+                      ref={renameInputRef}
+                      value={renameDraft}
+                      onChange={(e) => setRenameDraft(e.target.value)}
+                      onBlur={commitRename}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") commitRename();
+                        if (e.key === "Escape") {
+                          setRenamingTableId(null);
+                          setRenameDraft("");
+                        }
+                      }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="h-6 flex-1 text-sm"
+                    />
+                  ) : (
+                    <button
+                      onClick={() => {
+                        setSelectedTableId(isSelected ? null : table.id);
+                        if (!isSelected) {
+                          setExpandedSections((prev) => {
+                            const current = prev[table.id];
+                            return {
+                              ...prev,
+                              [table.id]:
+                                current ?? {
+                                  fields: true,
+                                  indexes: false,
+                                  comments: false,
+                                },
+                            };
+                          });
+                        }
+                      }}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        startRename(table.id, table.name);
+                      }}
+                      className="flex flex-1 items-center gap-2 truncate rounded text-left text-sm hover:text-foreground"
+                      title="Click to expand, double-click to rename"
+                    >
+                      <span
+                        className={`flex-1 truncate ${isSelected ? "font-semibold text-foreground" : "font-medium text-foreground/90"}`}
+                      >
+                        {table.name}
+                      </span>
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      removeTable(table.id);
+                      setOpenMenuTableId(menuOpen ? null : table.id);
                     }}
-                    className="rounded p-0.5 opacity-0 transition-opacity hover:bg-destructive/10 group-hover:opacity-100 [.border-b:hover_&]:opacity-100"
+                    className="rounded p-0.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover/table:opacity-100 data-[open=true]:opacity-100"
+                    data-open={menuOpen}
                   >
-                    <MoreHorizontal className="size-3.5 text-muted-foreground" />
+                    <MoreHorizontal className="size-3.5" />
                   </button>
-                </button>
+                  {menuOpen && (
+                    <>
+                      <button
+                        className="fixed inset-0 z-10 cursor-default"
+                        onClick={() => setOpenMenuTableId(null)}
+                        aria-label="close menu"
+                      />
+                      <div className="absolute right-2 top-7 z-20 min-w-[140px] rounded-md border bg-popover p-1 shadow-md">
+                        <button
+                          onClick={() => {
+                            startRename(table.id, table.name);
+                            setOpenMenuTableId(null);
+                          }}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted"
+                        >
+                          <Pencil className="size-3" />
+                          Rename table
+                        </button>
+                        <button
+                          onClick={() => {
+                            addColumn(table.id);
+                            setOpenMenuTableId(null);
+                          }}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs hover:bg-muted"
+                        >
+                          <Plus className="size-3" />
+                          Add field
+                        </button>
+                        <div className="my-1 h-px bg-border" />
+                        <button
+                          onClick={() => {
+                            setConfirmDeleteTableId(table.id);
+                            setOpenMenuTableId(null);
+                          }}
+                          className="flex w-full items-center gap-2 rounded px-2 py-1 text-xs text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="size-3" />
+                          Delete table
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </div>
 
-                {/* Expanded table content */}
+                {/* Expanded content */}
                 {isSelected && (
-                  <div className="pb-2 pl-6 pr-3">
-                    {/* Fields section */}
+                  <div className="pb-2 pl-7 pr-3">
+                    {/* Fields */}
                     <Collapsible
                       open={sections.fields}
-                      onOpenChange={() =>
-                        toggleSection(table.id, "fields")
-                      }
+                      onOpenChange={() => toggleSection(table.id, "fields")}
                     >
-                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
                         <ChevronDown
                           className={`size-3 transition-transform ${
                             sections.fields ? "" : "-rotate-90"
@@ -185,62 +296,136 @@ export function SchemaSidebar() {
                         Fields
                       </CollapsibleTrigger>
                       <CollapsibleContent>
-                        <div className="space-y-1.5 pb-2">
+                        <div className="space-y-1 pb-1">
                           {table.columns.map((col) => (
                             <div
                               key={col.id}
-                              className="flex items-center gap-1"
+                              className="group/field flex items-center gap-1"
                             >
-                              {/* Constraint toggles inline */}
+                              <GripVertical className="size-3 shrink-0 cursor-grab text-muted-foreground/30 group-hover/field:text-muted-foreground/70" />
+
+                              {/* Constraint pills */}
                               <div className="flex shrink-0 gap-0.5">
-                                {(
-                                  [
-                                    "PRIMARY KEY",
-                                    "NOT NULL",
-                                    "UNIQUE",
-                                    "AUTO_INCREMENT",
-                                  ] as ColumnConstraint[]
-                                ).map((constraint) => {
-                                  const active =
-                                    col.constraints.includes(constraint);
-                                  const label =
-                                    constraint === "PRIMARY KEY"
-                                      ? "PK"
-                                      : constraint === "NOT NULL"
-                                        ? "NN"
-                                        : constraint === "UNIQUE"
-                                          ? "UQ"
-                                          : "AI";
-                                  return (
-                                    <button
-                                      key={constraint}
-                                      onClick={() => {
+                                {(() => {
+                                  const isFk =
+                                    col.constraints.includes("REFERENCES");
+                                  const isAi =
+                                    col.constraints.includes("AUTO_INCREMENT");
+                                  const PILLS: Array<{
+                                    constraint: ColumnConstraint;
+                                    label: string;
+                                    color: string;
+                                    disabled: boolean;
+                                    disabledReason?: string;
+                                  }> = [
+                                    {
+                                      constraint: "PRIMARY KEY",
+                                      label: "PK",
+                                      color: "amber",
+                                      disabled: false,
+                                    },
+                                    {
+                                      constraint: "NOT NULL",
+                                      label: "NN",
+                                      color: "violet",
+                                      disabled: false,
+                                    },
+                                    {
+                                      constraint: "UNIQUE",
+                                      label: "UQ",
+                                      color: "violet",
+                                      disabled: false,
+                                    },
+                                    {
+                                      constraint: "AUTO_INCREMENT",
+                                      label: "AI",
+                                      color: "violet",
+                                      disabled: isFk,
+                                      disabledReason:
+                                        "Disabled — column is a foreign key",
+                                    },
+                                    {
+                                      constraint: "REFERENCES",
+                                      label: "FK",
+                                      color: "cyan",
+                                      disabled: isAi,
+                                      disabledReason:
+                                        "Disabled — column auto-increments",
+                                    },
+                                  ];
+
+                                  return PILLS.map(
+                                    ({
+                                      constraint,
+                                      label,
+                                      color,
+                                      disabled,
+                                      disabledReason,
+                                    }) => {
+                                      const active =
+                                        col.constraints.includes(constraint);
+                                      const handleClick = () => {
+                                        if (disabled) return;
+                                        if (
+                                          constraint === "REFERENCES" &&
+                                          !active
+                                        ) {
+                                          // Opening FK requires picking target → open picker
+                                          setFkPicker({
+                                            tableId: table.id,
+                                            columnId: col.id,
+                                          });
+                                          return;
+                                        }
                                         const next = active
                                           ? col.constraints.filter(
                                               (c) => c !== constraint
                                             )
-                                          : [
-                                              ...col.constraints,
-                                              constraint,
-                                            ];
-                                        updateColumn(table.id, col.id, {
-                                          constraints: next,
-                                        });
-                                      }}
-                                      className={`rounded px-1 py-px text-[9px] font-semibold leading-tight transition-colors ${
-                                        active
-                                          ? "bg-primary/15 text-primary"
-                                          : "text-muted-foreground/40 hover:text-muted-foreground"
-                                      }`}
-                                      title={constraint}
-                                    >
-                                      {label}
-                                    </button>
+                                          : [...col.constraints, constraint];
+                                        const updates: Partial<
+                                          typeof col
+                                        > = { constraints: next };
+                                        if (
+                                          constraint === "REFERENCES" &&
+                                          active
+                                        ) {
+                                          updates.references = undefined;
+                                        }
+                                        updateColumn(
+                                          table.id,
+                                          col.id,
+                                          updates
+                                        );
+                                      };
+                                      const colorClass = active
+                                        ? color === "amber"
+                                          ? "bg-amber-500/15 text-amber-600 dark:text-amber-400"
+                                          : color === "cyan"
+                                            ? "bg-cyan-500/15 text-cyan-600 dark:text-cyan-400"
+                                            : "bg-violet-500/15 text-violet-600 dark:text-violet-400"
+                                        : disabled
+                                          ? "text-muted-foreground/20 cursor-not-allowed"
+                                          : "text-muted-foreground/40 hover:text-muted-foreground";
+                                      return (
+                                        <button
+                                          key={constraint}
+                                          onClick={handleClick}
+                                          disabled={disabled}
+                                          className={`rounded px-1 py-px text-[9px] font-semibold leading-tight transition-colors ${colorClass}`}
+                                          title={
+                                            disabled
+                                              ? disabledReason
+                                              : constraint
+                                          }
+                                        >
+                                          {label}
+                                        </button>
+                                      );
+                                    }
                                   );
-                                })}
+                                })()}
                               </div>
 
-                              {/* Name input */}
                               <Input
                                 value={col.name}
                                 onChange={(e) =>
@@ -248,10 +433,9 @@ export function SchemaSidebar() {
                                     name: e.target.value,
                                   })
                                 }
-                                className="h-6 min-w-0 flex-1 border-dashed text-xs"
+                                className="h-6 min-w-0 flex-1 rounded-md bg-muted/40 px-2 text-xs"
                               />
 
-                              {/* Type select */}
                               <Select
                                 value={col.type}
                                 onValueChange={(val) => {
@@ -262,7 +446,7 @@ export function SchemaSidebar() {
                                   }
                                 }}
                               >
-                                <SelectTrigger className="h-6 w-[90px] shrink-0 border-dashed text-xs">
+                                <SelectTrigger className="h-6 w-[88px] shrink-0 rounded-md bg-muted/40 px-2 text-xs">
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
@@ -274,29 +458,35 @@ export function SchemaSidebar() {
                                 </SelectContent>
                               </Select>
 
-                              {/* Delete */}
                               <button
                                 onClick={() =>
-                                  removeColumn(table.id, col.id)
+                                  setConfirmDeleteColumn({
+                                    tableId: table.id,
+                                    columnId: col.id,
+                                  })
                                 }
-                                className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                                className="shrink-0 rounded p-0.5 text-muted-foreground/50 opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover/field:opacity-100"
+                                title="Delete field"
                               >
-                                <MoreHorizontal className="size-3.5" />
+                                <Trash2 className="size-3" />
                               </button>
                             </div>
                           ))}
+                          {table.columns.length === 0 && (
+                            <p className="py-1 text-[10px] italic text-muted-foreground/60">
+                              No fields. Click Add Field below.
+                            </p>
+                          )}
                         </div>
                       </CollapsibleContent>
                     </Collapsible>
 
-                    {/* Indexes section */}
+                    {/* Indexes */}
                     <Collapsible
                       open={sections.indexes}
-                      onOpenChange={() =>
-                        toggleSection(table.id, "indexes")
-                      }
+                      onOpenChange={() => toggleSection(table.id, "indexes")}
                     >
-                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
                         <ChevronDown
                           className={`size-3 transition-transform ${
                             sections.indexes ? "" : "-rotate-90"
@@ -311,14 +501,12 @@ export function SchemaSidebar() {
                       </CollapsibleContent>
                     </Collapsible>
 
-                    {/* Comments section */}
+                    {/* Comments */}
                     <Collapsible
                       open={sections.comments}
-                      onOpenChange={() =>
-                        toggleSection(table.id, "comments")
-                      }
+                      onOpenChange={() => toggleSection(table.id, "comments")}
                     >
-                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs text-muted-foreground hover:text-foreground">
+                      <CollapsibleTrigger className="flex w-full items-center gap-1.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground">
                         <ChevronDown
                           className={`size-3 transition-transform ${
                             sections.comments ? "" : "-rotate-90"
@@ -333,23 +521,27 @@ export function SchemaSidebar() {
                       </CollapsibleContent>
                     </Collapsible>
 
-                    {/* Action buttons */}
-                    <div className="flex gap-1.5 pt-1">
+                    {/* Action buttons — dark pills */}
+                    <div className="flex gap-1.5 pt-1.5">
                       <Button
                         size="xs"
-                        variant="outline"
-                        className="h-6 text-[10px]"
+                        className="h-7 gap-1 bg-foreground/90 px-2.5 text-background hover:bg-foreground"
                         disabled
                       >
-                        Add Index
+                        <Plus className="size-3" />
+                        <span className="text-[11px] font-medium">
+                          Add Index
+                        </span>
                       </Button>
                       <Button
                         size="xs"
-                        variant="outline"
-                        className="h-6 text-[10px]"
+                        className="h-7 gap-1 bg-foreground/90 px-2.5 text-background hover:bg-foreground"
                         onClick={() => addColumn(table.id)}
                       >
-                        Add Field
+                        <Plus className="size-3" />
+                        <span className="text-[11px] font-medium">
+                          Add Field
+                        </span>
                       </Button>
                     </div>
                   </div>
@@ -359,6 +551,59 @@ export function SchemaSidebar() {
           })}
         </div>
       </ScrollArea>
+
+      {/* Delete table confirm */}
+      <ConfirmDialog
+        open={confirmDeleteTableId !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDeleteTableId(null);
+        }}
+        title={(() => {
+          const t = schema.tables.find((x) => x.id === confirmDeleteTableId);
+          return t ? `Delete table "${t.name}"?` : "Delete table?";
+        })()}
+        description={(() => {
+          if (!confirmDeleteTableId) return "";
+          const dependentRelations = schema.relations.filter(
+            (r) =>
+              r.sourceTable === confirmDeleteTableId ||
+              r.targetTable === confirmDeleteTableId
+          ).length;
+          return `This permanently removes the table and ${dependentRelations} associated relation${dependentRelations === 1 ? "" : "s"}. This cannot be undone.`;
+        })()}
+        confirmLabel="Delete table"
+        onConfirm={() => {
+          if (confirmDeleteTableId) removeTable(confirmDeleteTableId);
+        }}
+      />
+
+      {/* FK picker dialog */}
+      <FkPickerDialog
+        open={fkPicker !== null}
+        onOpenChange={(open) => {
+          if (!open) setFkPicker(null);
+        }}
+        sourceTableId={fkPicker?.tableId}
+        sourceColumnId={fkPicker?.columnId}
+      />
+
+      {/* Delete column confirm */}
+      <ConfirmDialog
+        open={confirmDeleteColumn !== null}
+        onOpenChange={(open) => {
+          if (!open) setConfirmDeleteColumn(null);
+        }}
+        title="Delete field?"
+        description="This permanently removes the column. Existing relations referencing it will break."
+        confirmLabel="Delete field"
+        onConfirm={() => {
+          if (confirmDeleteColumn)
+            removeColumn(
+              confirmDeleteColumn.tableId,
+              confirmDeleteColumn.columnId
+            );
+        }}
+      />
     </div>
   );
 }
