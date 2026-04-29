@@ -1,8 +1,18 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState, type ReactElement } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
-import { Table2, X, Pencil, Check } from "lucide-react";
+import {
+  Table2,
+  X,
+  Pencil,
+  Check,
+  KeyRound,
+  Asterisk,
+  Fingerprint,
+  ArrowUp,
+  Link2,
+} from "lucide-react";
 import type { Table } from "@/lib/types";
 
 type TableNodeData = {
@@ -36,6 +46,58 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
     if (next && next !== table.name) onRename(table.id, next);
     else setDraftName(table.name);
     setEditing(false);
+  };
+
+  const getConstraintIndicators = (col: Table["columns"][number]) => {
+    const indicators: Array<{
+      key: string;
+      label: string;
+      icon: ReactElement;
+      className: string;
+    }> = [];
+
+    if (col.constraints.includes("PRIMARY KEY")) {
+      indicators.push({
+        key: "pk",
+        label: "Primary Key",
+        icon: <KeyRound className="size-2.5" />,
+        className: "text-amber-500",
+      });
+    }
+    if (col.constraints.includes("NOT NULL")) {
+      indicators.push({
+        key: "nn",
+        label: "Not Null",
+        icon: <Asterisk className="size-2.5" />,
+        className: "text-rose-500",
+      });
+    }
+    if (col.constraints.includes("UNIQUE")) {
+      indicators.push({
+        key: "uq",
+        label: "Unique",
+        icon: <Fingerprint className="size-2.5" />,
+        className: "text-violet-500",
+      });
+    }
+    if (col.constraints.includes("AUTO_INCREMENT")) {
+      indicators.push({
+        key: "ai",
+        label: "Auto Increment",
+        icon: <ArrowUp className="size-2.5" />,
+        className: "text-emerald-500",
+      });
+    }
+    if ((col.constraints.includes("REFERENCES") || col.references)) {
+      indicators.push({
+        key: "fk",
+        label: "Foreign Key",
+        icon: <Link2 className="size-2.5" />,
+        className: "text-cyan-500",
+      });
+    }
+
+    return indicators;
   };
 
   return (
@@ -118,7 +180,7 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
       <div className="bg-card">
         {table.columns.map((col, i) => {
           const isPk = col.constraints.includes("PRIMARY KEY");
-          const isFk = col.constraints.includes("REFERENCES") || !!col.references;
+          const indicators = getConstraintIndicators(col);
           return (
             <div
               key={col.id}
@@ -137,14 +199,18 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 className={`flex items-center gap-1 truncate font-mono ${isPk ? "font-semibold text-foreground" : "text-foreground/90"}`}
               >
                 <span className="truncate">{col.name}</span>
-                {isPk && (
-                  <span className="text-[9px] font-bold tracking-wider text-amber-500">
-                    PK
-                  </span>
-                )}
-                {isFk && !isPk && (
-                  <span className="text-[9px] font-bold tracking-wider text-cyan-500">
-                    FK
+                {indicators.length > 0 && (
+                  <span className="ml-0.5 flex items-center gap-1">
+                    {indicators.map((item) => (
+                      <span
+                        key={item.key}
+                        title={item.label}
+                        aria-label={item.label}
+                        className={item.className}
+                      >
+                        {item.icon}
+                      </span>
+                    ))}
                   </span>
                 )}
               </span>

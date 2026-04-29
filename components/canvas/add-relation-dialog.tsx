@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -17,9 +16,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Label } from "@/components/ui/label";
+import {
+  Form,
+  FormControl,
+  FormItem,
+  FormLabel,
+  FormMessage,
+  Controller,
+} from "@/components/ui/form";
 import { useSchema } from "@/lib/schema-store";
-import type { Relation } from "@/lib/types";
+import { useRelationForm } from "@/lib/hooks/use-relation-form";
 
 interface AddRelationDialogProps {
   open: boolean;
@@ -53,64 +59,35 @@ function DialogBody({
   defaultSourceTable?: string;
   onClose: () => void;
 }) {
-  const { schema, addRelation, updateColumn } = useSchema();
+  const { schema } = useSchema();
+  const { form, onSubmit } = useRelationForm(defaultSourceTable, onClose);
 
-  const initialSource = defaultSourceTable ?? schema.tables[0]?.id ?? "";
-  const initialTarget =
-    schema.tables.find((t) => t.id !== initialSource)?.id ?? "";
+  const sourceTableId = form.watch("sourceTable");
+  const targetTableId = form.watch("targetTable");
 
-  const [sourceTable, setSourceTable] = useState(initialSource);
-  const [targetTable, setTargetTable] = useState(initialTarget);
+  const sourceTableObj = schema.tables.find((t) => t.id === sourceTableId);
+  const targetTableObj = schema.tables.find((t) => t.id === targetTableId);
 
-  const sourceTableObj = schema.tables.find((t) => t.id === sourceTable);
-  const targetTableObj = schema.tables.find((t) => t.id === targetTable);
+  const handleSourceTableChange = (tableId: string | null) => {
+    if (!tableId) return;
+    form.setValue("sourceTable", tableId);
+    const tbl = schema.tables.find((t) => t.id === tableId);
+    const firstNonPk =
+      tbl?.columns.find((c) => !c.constraints.includes("PRIMARY KEY"))?.id ??
+      tbl?.columns[0]?.id ??
+      "";
+    form.setValue("sourceColumn", firstNonPk);
+  };
 
-  const defaultSourceCol =
-    sourceTableObj?.columns.find(
-      (c) => !c.constraints.includes("PRIMARY KEY")
-    )?.name ??
-    sourceTableObj?.columns[0]?.name ??
-    "";
-  const defaultTargetCol =
-    targetTableObj?.columns.find((c) =>
-      c.constraints.includes("PRIMARY KEY")
-    )?.name ??
-    targetTableObj?.columns[0]?.name ??
-    "";
-
-  const [sourceColumn, setSourceColumn] = useState(defaultSourceCol);
-  const [targetColumn, setTargetColumn] = useState(defaultTargetCol);
-  const [relType, setRelType] = useState<Relation["type"]>("one-to-many");
-
-  const canSubmit =
-    sourceTable &&
-    sourceColumn &&
-    targetTable &&
-    targetColumn &&
-    !(sourceTable === targetTable && sourceColumn === targetColumn);
-
-  const handleCreate = () => {
-    if (!canSubmit || !sourceTableObj || !targetTableObj) return;
-    const srcCol = sourceTableObj.columns.find((c) => c.id === sourceColumn);
-    const tgtCol = targetTableObj.columns.find((c) => c.id === targetColumn);
-    if (!srcCol || !tgtCol) return;
-
-    if (!srcCol.constraints.includes("REFERENCES")) {
-      updateColumn(sourceTableObj.id, srcCol.id, {
-        constraints: [...srcCol.constraints, "REFERENCES"],
-        references: { table: targetTableObj.name, column: tgtCol.name },
-      });
-    }
-
-    addRelation({
-      sourceTable,
-      sourceColumn,
-      targetTable,
-      targetColumn,
-      type: relType,
-    });
-
-    onClose();
+  const handleTargetTableChange = (tableId: string | null) => {
+    if (!tableId) return;
+    form.setValue("targetTable", tableId);
+    const tbl = schema.tables.find((t) => t.id === tableId);
+    const firstPk =
+      tbl?.columns.find((c) => c.constraints.includes("PRIMARY KEY"))?.id ??
+      tbl?.columns[0]?.id ??
+      "";
+    form.setValue("targetColumn", firstPk);
   };
 
   return (
@@ -123,157 +100,169 @@ function DialogBody({
         </DialogDescription>
       </DialogHeader>
 
-      <div className="grid gap-3 py-1">
-        <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1">
-            <Label className="text-[11px] text-muted-foreground">
-              Source table
-            </Label>
-            <Select
-              value={sourceTable}
-              onValueChange={(v) => {
-                const next = v ?? "";
-                setSourceTable(next);
-                const tbl = schema.tables.find((t) => t.id === next);
-                const firstNonPk =
-                  tbl?.columns.find(
-                    (c) => !c.constraints.includes("PRIMARY KEY")
-                  )?.id ??
-                  tbl?.columns[0]?.id ??
-                  "";
-                setSourceColumn(firstNonPk);
-              }}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick table">
-                  {sourceTableObj?.name}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {schema.tables.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-1">
-            <Label className="text-[11px] text-muted-foreground">
-              Source column (FK)
-            </Label>
-            <Select
-              value={sourceColumn}
-              onValueChange={(v) => setSourceColumn(v ?? "")}
-              disabled={!sourceTableObj}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick column" />
-              </SelectTrigger>
-              <SelectContent>
-                {sourceTableObj?.columns.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                    <span className="ml-2 text-muted-foreground">
-                      {c.type.toLowerCase()}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </div>
+      <Form {...form}>
+        <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+          <div className="grid grid-cols-2 gap-2">
+            <Controller
+              control={form.control}
+              name="sourceTable"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[11px]">Source table</FormLabel>
+                  <FormControl>
+                    <Select value={field.value} onValueChange={handleSourceTableChange}>
+                      <SelectTrigger className="w-full text-xs">
+                        <SelectValue placeholder="Pick table">
+                          {sourceTableObj?.name}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {schema.tables.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
 
-        <div className="grid grid-cols-2 gap-2">
-          <div className="grid gap-1">
-            <Label className="text-[11px] text-muted-foreground">
-              Target table
-            </Label>
-            <Select
-              value={targetTable}
-              onValueChange={(v) => {
-                const next = v ?? "";
-                setTargetTable(next);
-                const tbl = schema.tables.find((t) => t.id === next);
-                const firstPk =
-                  tbl?.columns.find((c) =>
-                    c.constraints.includes("PRIMARY KEY")
-                  )?.id ??
-                  tbl?.columns[0]?.id ??
-                  "";
-                setTargetColumn(firstPk);
-              }}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick table">
-                  {targetTableObj?.name}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {schema.tables.map((t) => (
-                  <SelectItem key={t.id} value={t.id}>
-                    {t.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <Controller
+              control={form.control}
+              name="sourceColumn"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[11px]">
+                    Source column (FK)
+                  </FormLabel>
+                  <FormControl>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger
+                        className="w-full text-xs"
+                        disabled={!sourceTableObj}
+                      >
+                        <SelectValue placeholder="Pick column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {sourceTableObj?.columns.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                            <span className="ml-2 text-muted-foreground">
+                              {c.type.toLowerCase()}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </div>
-          <div className="grid gap-1">
-            <Label className="text-[11px] text-muted-foreground">
-              Target column (PK)
-            </Label>
-            <Select
-              value={targetColumn}
-              onValueChange={(v) => setTargetColumn(v ?? "")}
-              disabled={!targetTableObj}
-            >
-              <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick column" />
-              </SelectTrigger>
-              <SelectContent>
-                {targetTableObj?.columns.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>
-                    {c.name}
-                    <span className="ml-2 text-muted-foreground">
-                      {c.type.toLowerCase()}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+
+          <div className="grid grid-cols-2 gap-2">
+            <Controller
+              control={form.control}
+              name="targetTable"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[11px]">Target table</FormLabel>
+                  <FormControl>
+                    <Select value={field.value} onValueChange={handleTargetTableChange}>
+                      <SelectTrigger className="w-full text-xs">
+                        <SelectValue placeholder="Pick table">
+                          {targetTableObj?.name}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {schema.tables.map((t) => (
+                          <SelectItem key={t.id} value={t.id}>
+                            {t.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+
+            <Controller
+              control={form.control}
+              name="targetColumn"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel className="text-[11px]">
+                    Target column (PK)
+                  </FormLabel>
+                  <FormControl>
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <SelectTrigger
+                        className="w-full text-xs"
+                        disabled={!targetTableObj}
+                      >
+                        <SelectValue placeholder="Pick column" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {targetTableObj?.columns.map((c) => (
+                          <SelectItem key={c.id} value={c.id}>
+                            {c.name}
+                            <span className="ml-2 text-muted-foreground">
+                              {c.type.toLowerCase()}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </FormControl>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
           </div>
-        </div>
 
-        <div className="grid gap-1">
-          <Label className="text-[11px] text-muted-foreground">
-            Relationship type
-          </Label>
-          <Select
-            value={relType}
-            onValueChange={(v) => v && setRelType(v as Relation["type"])}
-          >
-            <SelectTrigger className="h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="one-to-one">One-to-One (1:1)</SelectItem>
-              <SelectItem value="one-to-many">One-to-Many (1:N)</SelectItem>
-              <SelectItem value="many-to-many">
-                Many-to-Many (N:M)
-              </SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+          <Controller
+            control={form.control}
+            name="type"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-[11px]">Relationship type</FormLabel>
+                <FormControl>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <SelectTrigger className="w-full text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="one-to-one">
+                        One-to-One (1:1)
+                      </SelectItem>
+                      <SelectItem value="one-to-many">
+                        One-to-Many (1:N)
+                      </SelectItem>
+                      <SelectItem value="many-to-many">
+                        Many-to-Many (N:M)
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
 
-      <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
-          Cancel
-        </Button>
-        <Button onClick={handleCreate} disabled={!canSubmit}>
-          Create Relation
-        </Button>
-      </DialogFooter>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button type="submit">Create Relation</Button>
+          </DialogFooter>
+        </form>
+      </Form>
     </>
   );
 }

@@ -81,3 +81,109 @@
 - [ ] Performance optimization
 - [ ] Error handling and edge cases
 - [ ] Testing (unit + integration)
+
+
+# 🚀 Phase 7: Project System & Multi-Schema Workspaces (Week 12-13)
+
+## 🧱 Core Concept
+
+* A **Workspace** → contains multiple **Projects**
+* A **Project** → contains multiple **Schemas**
+* A **Schema** → your current canvas + SQL + metadata
+
+---
+
+## 📦 Data Model Updates (Prisma)
+
+* [ ] Add `Project` model
+
+  * id
+  * name
+  * description
+  * workspaceId (relation)
+  * createdAt / updatedAt
+
+* [ ] Update `Schema` model
+
+  * add `projectId`
+  * allow multiple schemas per project
+  * optional `version` field
+
+* [ ] Optional: Schema versioning table
+
+  * `SchemaVersion`
+  * snapshot of schema JSON + SQL
+
+---
+
+## 🧭 Backend / API
+
+* [ ] Create project routes:
+
+  * `/api/projects` (CRUD)
+  * `/api/projects/[id]`
+
+* [ ] Update schema routes:
+
+  * `/api/projects/[projectId]/schemas`
+  * `/api/schemas/[id]`
+
+* [ ] Implement:
+
+  * create project
+  * rename/delete project
+  * list schemas inside project
+
+---
+
+## 🖥️ Frontend UI
+
+* [ ] Add **Project Dashboard**
+
+  * grid/list view of projects
+  * create new project modal
+
+* [ ] Inside project:
+
+  * schema list panel (like files)
+  * “+ New Schema” button
+
+* [ ] Navigation structure:
+
+  ```
+  Workspace
+   └── Project
+        ├── Schema A
+        ├── Schema B
+        └── Schema C
+  ```
+
+---
+
+## 🔁 Schema Management Features
+
+* [ ] Duplicate schema
+* [ ] Rename schema
+* [ ] Delete schema
+* [ ] Switch between schemas (load into canvas)
+
+---
+
+## 🧠 Advanced (High Value)
+
+* [ ] Schema version history (time-travel)
+* [ ] Compare schemas (diff view)
+* [ ] Tag schemas (e.g., "prod", "draft", "v2")
+
+
+## ⚡ UX Enhancements
+
+* [ ] Breadcrumb navigation:
+
+  ```
+  Workspace > Project > Schema
+  ```
+
+* [ ] Autosave per schema (already exists → just scope it correctly)
+
+* [ ] Recent projects / schemas

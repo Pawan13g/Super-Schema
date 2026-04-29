@@ -150,6 +150,17 @@ function generatePrismaModel(
     }
   }
 
+  for (const index of table.indexes ?? []) {
+    const fields = index.columns
+      .map((columnId) => table.columns.find((column) => column.id === columnId)?.name)
+      .filter((name): name is string => Boolean(name));
+    if (fields.length === 0) continue;
+    const line = index.unique
+      ? `  @@unique([${fields.join(", ")}])`
+      : `  @@index([${fields.join(", ")}])`;
+    lines.push(`\n${line}`);
+  }
+
   // Map table name if needed
   if (table.name !== table.name.toLowerCase()) {
     lines.push(`\n  @@map("${table.name}")`);
@@ -235,6 +246,20 @@ function generateSequelizeModel(
   lines.push("  }, {");
   lines.push(`    tableName: '${table.name}',`);
   lines.push("    timestamps: false,");
+  if ((table.indexes ?? []).length > 0) {
+    lines.push("    indexes: [");
+    for (const index of table.indexes ?? []) {
+      const fields = index.columns
+        .map((columnId) => table.columns.find((column) => column.id === columnId)?.name)
+        .filter((name): name is string => Boolean(name));
+      if (fields.length === 0) continue;
+      lines.push("      {");
+      lines.push(`        unique: ${index.unique ? "true" : "false"},`);
+      lines.push(`        fields: [${fields.map((field) => `'${field}'`).join(", ")}],`);
+      lines.push("      },");
+    }
+    lines.push("    ],");
+  }
   lines.push("  });");
 
   // Associations

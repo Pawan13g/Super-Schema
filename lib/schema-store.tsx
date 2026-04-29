@@ -7,7 +7,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Column, ColumnConstraint, ColumnType, Schema, Table, Relation } from "./types";
+import type {
+  Column,
+  ColumnConstraint,
+  ColumnType,
+  Relation,
+  Schema,
+  Table,
+  TableIndex,
+} from "./types";
 import { TABLE_COLORS, COLUMN_TYPES } from "./types";
 import type { GeneratedSchema } from "./langchain/ai";
 
@@ -22,6 +30,9 @@ interface SchemaStore {
   addColumn: (tableId: string) => void;
   removeColumn: (tableId: string, columnId: string) => void;
   updateColumn: (tableId: string, columnId: string, updates: Partial<Column>) => void;
+  addIndex: (tableId: string, index: Omit<TableIndex, "id">) => void;
+  removeIndex: (tableId: string, indexId: string) => void;
+  updateTableComment: (tableId: string, comment: string) => void;
   addRelation: (relation: Omit<Relation, "id">) => void;
   removeRelation: (relationId: string) => void;
   createJunctionTable: (
@@ -35,6 +46,22 @@ interface SchemaStore {
 }
 
 const SchemaContext = createContext<SchemaStore | null>(null);
+
+function normalizeColumn(column: Column): Column {
+  return {
+    ...column,
+    comment: column.comment ?? "",
+  };
+}
+
+function normalizeTable(table: Partial<Table> & Pick<Table, "id" | "name" | "color" | "columns" | "position">): Table {
+  return {
+    ...table,
+    columns: table.columns.map((column) => normalizeColumn(column)),
+    indexes: table.indexes ?? [],
+    comment: table.comment ?? "",
+  };
+}
 
 function genId(prefix: string) {
   // Use browser-native UUIDs when available to avoid ID collisions
@@ -53,6 +80,7 @@ function makeDefaultColumn(): Column {
     name: "id",
     type: "SERIAL" as ColumnType,
     constraints: ["PRIMARY KEY"],
+    comment: "",
   };
 }
 
@@ -64,13 +92,13 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     const id = genId("tbl");
     setSchema((prev) => {
       const color = TABLE_COLORS[prev.tables.length % TABLE_COLORS.length];
-      const table: Table = {
+      const table: Table = normalizeTable({
         id,
         name,
         color,
         columns: [{ ...makeDefaultColumn() }],
         position: { x: 100 + Math.random() * 300, y: 100 + Math.random() * 200 },
-      };
+      });
       return { ...prev, tables: [...prev.tables, table] };
     });
     setSelectedTableId(id);
@@ -111,6 +139,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
       name: "new_column",
       type: "VARCHAR",
       constraints: [],
+      comment: "",
     };
     setSchema((prev) => ({
       ...prev,
@@ -149,6 +178,37 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     },
     []
   );
+
+  const addIndex = useCallback((tableId: string, index: Omit<TableIndex, "id">) => {
+    setSchema((prev) => ({
+      ...prev,
+      tables: prev.tables.map((table) =>
+        table.id === tableId
+          ? { ...table, indexes: [...(table.indexes ?? []), { ...index, id: genId("idx") }] }
+          : table
+      ),
+    }));
+  }, []);
+
+  const removeIndex = useCallback((tableId: string, indexId: string) => {
+    setSchema((prev) => ({
+      ...prev,
+      tables: prev.tables.map((table) =>
+        table.id === tableId
+          ? { ...table, indexes: (table.indexes ?? []).filter((index) => index.id !== indexId) }
+          : table
+      ),
+    }));
+  }, []);
+
+  const updateTableComment = useCallback((tableId: string, comment: string) => {
+    setSchema((prev) => ({
+      ...prev,
+      tables: prev.tables.map((table) =>
+        table.id === tableId ? { ...table, comment } : table
+      ),
+    }));
+  }, []);
 
   const addRelation = useCallback((relation: Omit<Relation, "id">) => {
     const id = genId("rel");
@@ -205,6 +265,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
               name: `${sourceTable.name}_${sourceCol.name}`,
               type: fkType(sourceCol.type),
               constraints: ["PRIMARY KEY", "NOT NULL", "REFERENCES"],
+              comment: "",
               references: { table: sourceTable.name, column: sourceCol.name },
             },
             {
@@ -212,9 +273,12 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
               name: `${targetTable.name}_${targetCol.name}`,
               type: fkType(targetCol.type),
               constraints: ["PRIMARY KEY", "NOT NULL", "REFERENCES"],
+              comment: "",
               references: { table: targetTable.name, column: targetCol.name },
             },
           ],
+          indexes: [],
+          comment: "",
           position: {
             x:
               ((sourceTable.position.x ?? 100) +
@@ -276,7 +340,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         const constraints = (c.constraints ?? []).filter((cn) =>
           ["PRIMARY KEY", "NOT NULL", "UNIQUE", "AUTO_INCREMENT", "DEFAULT", "CHECK", "REFERENCES"].includes(cn)
         ) as ColumnConstraint[];
-        return { id: colId, name: c.name, type: colType, constraints };
+        return { id: colId, name: c.name, type: colType, constraints, comment: "" };
       });
 
       colMap.set(t.name, colEntries);
@@ -286,6 +350,8 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         name: t.name,
         color: TABLE_COLORS[i % TABLE_COLORS.length],
         columns,
+        indexes: [],
+        comment: "",
         position: { x: (i % COLS) * GRID_X + 50, y: Math.floor(i / COLS) * GRID_Y + 50 },
       };
     });
@@ -317,7 +383,10 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const replaceSchema = useCallback((next: Schema) => {
-    setSchema(next);
+    setSchema({
+      tables: next.tables.map((table) => normalizeTable(table)),
+      relations: next.relations,
+    });
     setSelectedTableId(null);
   }, []);
 
@@ -334,6 +403,9 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         addColumn,
         removeColumn,
         updateColumn,
+        addIndex,
+        removeIndex,
+        updateTableComment,
         addRelation,
         removeRelation,
         createJunctionTable,

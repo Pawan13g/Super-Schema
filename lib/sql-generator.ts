@@ -75,6 +75,10 @@ function quoteIdentifier(name: string, dialect: SqlDialect): string {
   return `"${name}"`;
 }
 
+function quoteStringLiteral(value: string): string {
+  return `'${value.replace(/'/g, "''")}'`;
+}
+
 function generateColumnDef(
   col: Column,
   dialect: SqlDialect,
@@ -124,6 +128,10 @@ function generateColumnDef(
     if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
   }
 
+  if (dialect === "mysql" && col.comment?.trim()) {
+    parts.push(`COMMENT ${quoteStringLiteral(col.comment.trim())}`);
+  }
+
   return parts.join(" ");
 }
 
@@ -151,6 +159,58 @@ function generateForeignKeys(
   }
 
   return fks;
+}
+
+function generateIndexStatements(table: Table, dialect: SqlDialect): string[] {
+  const q = (n: string) => quoteIdentifier(n, dialect);
+  const statements: string[] = [];
+
+  for (const index of table.indexes ?? []) {
+    const columns = index.columns
+      .map((columnName) => table.columns.find((column) => column.id === columnName))
+      .filter((column): column is Column => Boolean(column))
+      .map((column) => q(column.name));
+
+    if (columns.length === 0) continue;
+
+    const indexName = index.name.trim() || `idx_${table.name}_${columns.join("_")}`;
+    const unique = index.unique ? "UNIQUE " : "";
+    statements.push(
+      `CREATE ${unique}INDEX ${q(indexName)} ON ${q(table.name)} (${columns.join(", ")});`
+    );
+  }
+
+  return statements;
+}
+
+function generateCommentStatements(table: Table, dialect: SqlDialect): string[] {
+  const q = (n: string) => quoteIdentifier(n, dialect);
+  const statements: string[] = [];
+
+  if (table.comment?.trim()) {
+    const tableComment = quoteStringLiteral(table.comment.trim());
+
+    if (dialect === "postgresql") {
+      statements.push(`COMMENT ON TABLE ${q(table.name)} IS ${tableComment};`);
+    } else if (dialect === "mysql") {
+      statements.push(`ALTER TABLE ${q(table.name)} COMMENT = ${tableComment};`);
+    } else {
+      statements.push(`-- Comment on ${table.name}: ${table.comment.trim()}`);
+    }
+  }
+
+  for (const col of table.columns) {
+    if (!col.comment?.trim()) continue;
+    const columnComment = quoteStringLiteral(col.comment.trim());
+
+    if (dialect === "postgresql") {
+      statements.push(`COMMENT ON COLUMN ${q(table.name)}.${q(col.name)} IS ${columnComment};`);
+    } else if (dialect === "sqlite") {
+      statements.push(`-- Comment on ${table.name}.${col.name}: ${col.comment.trim()}`);
+    }
+  }
+
+  return statements;
 }
 
 function generateTableSql(
@@ -184,5 +244,10 @@ export function generateSql(schema: Schema, dialect: SqlDialect): string {
     generateTableSql(table, schema.relations, schema.tables, dialect)
   );
 
-  return header + "\n" + statements.join("\n\n") + "\n";
+  const extras = schema.tables.flatMap((table) => [
+    ...generateIndexStatements(table, dialect),
+    ...generateCommentStatements(table, dialect),
+  ]);
+
+  return header + "\n" + [...statements, ...extras].join("\n\n") + "\n";
 }

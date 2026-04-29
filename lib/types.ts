@@ -63,11 +63,19 @@ export interface Column {
   name: string;
   type: ColumnType;
   constraints: ColumnConstraint[];
+  comment?: string;
   defaultValue?: string;
   references?: {
     table: string;
     column: string;
   };
+}
+
+export interface TableIndex {
+  id: string;
+  name: string;
+  columns: string[];
+  unique: boolean;
 }
 
 export const TABLE_COLORS = [
@@ -86,6 +94,8 @@ export interface Table {
   name: string;
   color: string;
   columns: Column[];
+  indexes: TableIndex[];
+  comment: string;
   position: { x: number; y: number };
 }
 
