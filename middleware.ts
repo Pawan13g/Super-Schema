@@ -4,7 +4,7 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ["/sign-in", "/sign-up"];
+const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/api/sign-in", "/api/sign-up"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -19,7 +19,6 @@ export default auth((req) => {
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const isLoggedIn = !!req.auth;
-
   if (!isLoggedIn && !isPublic) {
     const url = new URL("/sign-in", req.url);
     url.searchParams.set("callbackUrl", pathname);

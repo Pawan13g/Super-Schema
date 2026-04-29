@@ -12,13 +12,13 @@ import { Loader2, Database } from "lucide-react";
 export default function SignUpPage() {
   const router = useRouter();
 
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [name, setName] = useState("Pawan Guptas");
+  const [email, setEmail] = useState("pawangupta130803@gmail.com");
+  const [password, setPassword] = useState("1234567890");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.SubmitEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
@@ -27,7 +27,7 @@ export default function SignUpPage() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, email, password }),
-    });
+    }); 
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? "Sign-up failed.");

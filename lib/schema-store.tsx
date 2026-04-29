@@ -36,9 +36,15 @@ interface SchemaStore {
 
 const SchemaContext = createContext<SchemaStore | null>(null);
 
-let nextId = 1;
 function genId(prefix: string) {
-  return `${prefix}_${nextId++}`;
+  // Use browser-native UUIDs when available to avoid ID collisions
+  // across page refreshes (which reset module-scoped counters).
+  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
+    // remove dashes to keep IDs compact
+    return `${prefix}_${(crypto as any).randomUUID().replace(/-/g, "")}`;
+  }
+  // Fallback to a timestamp-based id when crypto.randomUUID isn't available
+  return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000)}`;
 }
 
 function makeDefaultColumn(): Column {

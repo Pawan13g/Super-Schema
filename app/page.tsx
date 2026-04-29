@@ -47,15 +47,11 @@ import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
 
 function AppNavbar({
-  sidebarCollapsed,
-  onToggleSidebar,
   sqlPanelCollapsed,
   onToggleSqlPanel,
   aiPanelOpen,
   onToggleAiPanel,
 }: {
-  sidebarCollapsed: boolean;
-  onToggleSidebar: () => void;
   sqlPanelCollapsed: boolean;
   onToggleSqlPanel: () => void;
   aiPanelOpen: boolean;
@@ -63,18 +59,6 @@ function AppNavbar({
 }) {
   return (
     <header className="flex h-10 shrink-0 items-center gap-1 border-b bg-card px-3">
-      <Button
-        variant="ghost"
-        size="icon-sm"
-        onClick={onToggleSidebar}
-        title="Toggle sidebar"
-      >
-        {sidebarCollapsed ? (
-          <PanelLeft className="size-4" />
-        ) : (
-          <PanelLeftClose className="size-4" />
-        )}
-      </Button>
       <BrandLogo />
       <span className="text-sm font-bold tracking-tight">Super Schema</span>
 
@@ -192,9 +176,24 @@ function UserMenu() {
   );
 }
 
-function CanvasHeader() {
+function CanvasHeader({ onToggleSidebar, sidebarCollapsed }: {
+  sidebarCollapsed: boolean;
+  onToggleSidebar: () => void;
+}) {
   return (
-    <div className="flex shrink-0 items-center justify-between border-b bg-card/50 px-4 py-2.5">
+    <div className="flex shrink-0 items-center space-x-2 border-b bg-card/50 px-4 py-2.5">
+      <Button
+        variant="ghost"
+        size="icon"
+        onClick={onToggleSidebar}
+        title="Toggle sidebar"
+      >
+        {sidebarCollapsed ? (
+          <PanelLeft className="size-4" />
+        ) : (
+          <PanelLeftClose className="size-4" />
+        )}
+      </Button>
       <div>
         <h1 className="text-sm font-semibold tracking-tight">
           Untitled Database
@@ -212,7 +211,7 @@ export default function Home() {
   const sqlPanelRef = usePanelRef();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sqlPanelCollapsed, setSqlPanelCollapsed] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(false);
+  const [aiPanelOpen, setAiPanelOpen] = useState(true);
 
   const toggleSidebar = () => {
     const panel = sidebarRef.current;
@@ -237,67 +236,67 @@ export default function Home() {
   return (
     <SchemaProvider>
       <WorkspaceProvider>
-      <div className="flex h-full w-full flex-1 flex-col">
-        <AppNavbar
-          sidebarCollapsed={sidebarCollapsed}
-          onToggleSidebar={toggleSidebar}
-          sqlPanelCollapsed={sqlPanelCollapsed}
-          onToggleSqlPanel={toggleSqlPanel}
-          aiPanelOpen={aiPanelOpen}
-          onToggleAiPanel={() => setAiPanelOpen((v) => !v)}
-        />
-        <ResizablePanelGroup orientation="horizontal" className="flex-1">
-          <ResizablePanel
-            panelRef={sidebarRef}
-            defaultSize="25%"
-            minSize="20%"
-            maxSize="50%"
-            collapsible
-            collapsedSize={0}
-            onResize={(size) => setSidebarCollapsed(size.asPercentage === 0)}
-          >
-            <SchemaSidebar />
-          </ResizablePanel>
-          <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={70} minSize={30}>
-            <ResizablePanelGroup orientation="horizontal">
-              <ResizablePanel defaultSize={aiPanelOpen ? 70 : 100} minSize={40}>
-                <ResizablePanelGroup orientation="vertical">
-                  <ResizablePanel defaultSize={65} minSize={30}>
-                    <div className="flex h-full flex-col">
-                      <CanvasHeader />
-                      <div className="flex-1">
-                        <SchemaCanvas />
+        <div className="flex h-full w-full flex-1 flex-col">
+          <AppNavbar
+            sqlPanelCollapsed={sqlPanelCollapsed}
+            onToggleSqlPanel={toggleSqlPanel}
+            aiPanelOpen={aiPanelOpen}
+            onToggleAiPanel={() => setAiPanelOpen((v) => !v)}
+          />
+          <ResizablePanelGroup orientation="horizontal" className="flex-1">
+            <ResizablePanel
+              panelRef={sidebarRef}
+              defaultSize={20}
+              minSize="15%"
+              maxSize="30%"
+              collapsible
+              collapsedSize={0}
+              onResize={(size) => setSidebarCollapsed(size.asPercentage === 0)}
+            >
+              <SchemaSidebar />
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={70} minSize={30}>
+              <ResizablePanelGroup orientation="horizontal">
+                <ResizablePanel defaultSize={aiPanelOpen ? 70 : 100} minSize={40}>
+                  <ResizablePanelGroup orientation="vertical">
+                    <ResizablePanel defaultSize={65} minSize={30}>
+                      <div className="flex h-full flex-col">
+                        <CanvasHeader onToggleSidebar={toggleSidebar} sidebarCollapsed={sidebarCollapsed} />
+                        <div className="flex-1">
+                          <SchemaCanvas />
+                        </div>
                       </div>
-                    </div>
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel
-                    panelRef={sqlPanelRef}
-                    defaultSize={35}
-                    minSize={15}
-                    collapsible
-                    collapsedSize={0}
-                    onResize={(size) =>
-                      setSqlPanelCollapsed(size.asPercentage === 0)
-                    }
-                  >
-                    <SqlPreview />
-                  </ResizablePanel>
-                </ResizablePanelGroup>
-              </ResizablePanel>
-              {aiPanelOpen && (
-                <>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize="25%" minSize="20%" maxSize="50%">
-                    <AiChat onClose={() => setAiPanelOpen(false)} />
-                  </ResizablePanel>
-                </>
-              )}
-            </ResizablePanelGroup>
-          </ResizablePanel>
-        </ResizablePanelGroup>
-      </div>
+                    </ResizablePanel>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel
+                      panelRef={sqlPanelRef}
+                      defaultSize={35}
+                      minSize={15}
+                      collapsible
+                      collapsedSize={0}
+                      onResize={(size) =>
+                        setSqlPanelCollapsed(size.asPercentage === 0)
+                      }
+                    >
+                      <SqlPreview />
+                    </ResizablePanel>
+                  </ResizablePanelGroup>
+                </ResizablePanel>
+                {aiPanelOpen && (
+                  <>
+                    <ResizableHandle withHandle />
+                    <ResizablePanel defaultSize={25}
+                      minSize="25%"
+                      maxSize="35%">
+                      <AiChat onClose={() => setAiPanelOpen(false)} />
+                    </ResizablePanel>
+                  </>
+                )}
+              </ResizablePanelGroup>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </div>
       </WorkspaceProvider>
     </SchemaProvider>
   );

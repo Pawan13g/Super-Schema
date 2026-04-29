@@ -68,14 +68,14 @@ function DialogBody({
   const defaultSourceCol =
     sourceTableObj?.columns.find(
       (c) => !c.constraints.includes("PRIMARY KEY")
-    )?.id ??
-    sourceTableObj?.columns[0]?.id ??
+    )?.name ??
+    sourceTableObj?.columns[0]?.name ??
     "";
   const defaultTargetCol =
     targetTableObj?.columns.find((c) =>
       c.constraints.includes("PRIMARY KEY")
-    )?.id ??
-    targetTableObj?.columns[0]?.id ??
+    )?.name ??
+    targetTableObj?.columns[0]?.name ??
     "";
 
   const [sourceColumn, setSourceColumn] = useState(defaultSourceCol);
@@ -145,7 +145,9 @@ function DialogBody({
               }}
             >
               <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick table" />
+                <SelectValue placeholder="Pick table">
+                  {sourceTableObj?.name}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {schema.tables.map((t) => (
@@ -203,7 +205,9 @@ function DialogBody({
               }}
             >
               <SelectTrigger className="h-8 text-xs">
-                <SelectValue placeholder="Pick table" />
+                <SelectValue placeholder="Pick table">
+                  {targetTableObj?.name}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {schema.tables.map((t) => (

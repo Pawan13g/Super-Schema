@@ -5,13 +5,14 @@ import { prisma } from "@/lib/db";
 
 const bodySchema = z.object({
   name: z.string().min(1).max(100),
-  email: z.string().email(),
+  email: z.email(),
   password: z.string().min(8).max(128),
 });
 
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
+    console.log(body)
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -30,7 +31,6 @@ export async function POST(request: NextRequest) {
     }
 
     const passwordHash = await bcrypt.hash(password, 10);
-
     const user = await prisma.user.create({
       data: { name, email, passwordHash },
       select: { id: true, email: true, name: true },
@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
 
     return Response.json({ user });
   } catch (err) {
+    console.log(err)
     const message = err instanceof Error ? err.message : "Sign-up failed";
     return Response.json({ error: message }, { status: 500 });
   }
