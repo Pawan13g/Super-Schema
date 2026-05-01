@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, Database } from "lucide-react";
 
-export const metadata = {
-  title: "Privacy Policy — Super Schema",
+export const metadata: Metadata = {
+  title: "Privacy Policy",
+  description:
+    "How Super Schema handles your data — schemas stored in your own database, AI keys encrypted at rest, no training on user content.",
+  alternates: { canonical: "/privacy" },
+  robots: { index: true, follow: true },
 };
 
 export default function PrivacyPage() {

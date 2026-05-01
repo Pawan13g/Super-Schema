@@ -95,5 +95,34 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
         } catch {}
       }
     },
+    // Refresh the user row's name/image from the OAuth profile on each
+    // sign-in. We only fill blanks — never clobber a value the user has
+    // manually edited in Settings.
+    async signIn({ user, account, profile }) {
+      if (!user?.id || !account || account.provider === "credentials") return;
+      const providerName =
+        (profile as { name?: string } | undefined)?.name ?? user.name;
+      const providerImage =
+        (profile as { picture?: string; avatar_url?: string } | undefined)
+          ?.picture ??
+        (profile as { avatar_url?: string } | undefined)?.avatar_url ??
+        user.image;
+      if (!providerName && !providerImage) return;
+
+      try {
+        const existing = await prisma.user.findUnique({
+          where: { id: user.id },
+          select: { name: true, image: true },
+        });
+        const data: { name?: string; image?: string } = {};
+        if (providerName && !existing?.name) data.name = providerName;
+        if (providerImage && !existing?.image) data.image = providerImage;
+        if (Object.keys(data).length > 0) {
+          await prisma.user.update({ where: { id: user.id }, data });
+        }
+      } catch {
+        // non-fatal — login continues without profile sync
+      }
+    },
   },
 });

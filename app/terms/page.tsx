@@ -1,8 +1,13 @@
+import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, Database } from "lucide-react";
 
-export const metadata = {
-  title: "Terms & Conditions — Super Schema",
+export const metadata: Metadata = {
+  title: "Terms & Conditions",
+  description:
+    "Super Schema terms of service — usage, BYOK AI keys, intellectual property, and acceptable use.",
+  alternates: { canonical: "/terms" },
+  robots: { index: true, follow: true },
 };
 
 export default function TermsPage() {

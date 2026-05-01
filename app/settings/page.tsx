@@ -20,7 +20,10 @@ import {
 import {
   ArrowLeft,
   BookOpen,
+  Check,
+  Copy,
   Database,
+  ExternalLink,
   Eye,
   EyeOff,
   Code2 as Github,
@@ -851,68 +854,189 @@ function AppearanceTab() {
 
 // -- Connections tab --------------------------------------------------------
 
+interface CallbackEntry {
+  provider: "google" | "github" | "microsoft";
+  label: string;
+  callbackUrl: string;
+  consoleUrl: string;
+  envVars: string[];
+  enabled: boolean;
+  notes?: string;
+}
+
+interface CallbackInfo {
+  origin: string;
+  callbacks: CallbackEntry[];
+}
+
 function ConnectionsTab({ profile }: { profile: ProfileData | null }) {
+  const [callbackInfo, setCallbackInfo] = useState<CallbackInfo | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/callbacks")
+      .then((r) => r.json())
+      .then(setCallbackInfo)
+      .catch(() => {});
+  }, []);
+
   if (!profile) return null;
-  const linked = new Set(profile.accounts.map((a) => a.provider));
+  const linkedAccountProviders = new Set(profile.accounts.map((a) => a.provider));
   const items = [
-    { id: "google", label: "Google", icon: Mail },
-    { id: "github", label: "GitHub", icon: Github },
-    { id: "microsoft-entra-id", label: "Microsoft", icon: KeyRound },
+    { id: "google", linkedKey: "google", label: "Google", icon: Mail },
+    { id: "github", linkedKey: "github", label: "GitHub", icon: Github },
+    {
+      id: "microsoft",
+      linkedKey: "microsoft-entra-id",
+      label: "Microsoft",
+      icon: KeyRound,
+    },
   ];
 
   return (
-    <Section
-      title="Connections"
-      description="OAuth providers linked to your account. Sign in via these providers from the sign-in page."
-    >
-      <ul className="grid gap-2">
-        {items.map(({ id, label, icon: Icon }) => {
-          const isLinked = linked.has(id);
-          return (
-            <li
-              key={id}
-              className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 p-3"
-            >
-              <div className="flex items-center gap-3">
-                <div className="flex size-9 items-center justify-center rounded-lg bg-card ring-1 ring-border">
-                  <Icon className="size-4" />
-                </div>
-                <div>
-                  <p className="text-sm font-medium">{label}</p>
-                  <p className="text-[11px] text-muted-foreground">
-                    {isLinked ? "Linked" : "Not linked"}
-                  </p>
-                </div>
-              </div>
-              <span
-                className={cn(
-                  "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                  isLinked
-                    ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                    : "bg-muted text-muted-foreground"
-                )}
+    <>
+      <Section
+        title="Connections"
+        description="OAuth providers linked to your account. Sign in via these providers from the sign-in page."
+      >
+        <ul className="grid gap-2">
+          {items.map(({ id, linkedKey, label, icon: Icon }) => {
+            const isLinked = linkedAccountProviders.has(linkedKey);
+            const meta = callbackInfo?.callbacks.find((c) => c.provider === id);
+            const isConfigured = meta?.enabled ?? false;
+            return (
+              <li
+                key={id}
+                className="flex items-center justify-between gap-3 rounded-xl border bg-muted/30 p-3"
               >
-                {isLinked ? "Connected" : "Not connected"}
-              </span>
-            </li>
-          );
-        })}
-      </ul>
+                <div className="flex items-center gap-3">
+                  <div className="flex size-9 items-center justify-center rounded-lg bg-card ring-1 ring-border">
+                    <Icon className="size-4" />
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium">{label}</p>
+                    <p className="text-[11px] text-muted-foreground">
+                      {isLinked
+                        ? "Linked to your account"
+                        : isConfigured
+                          ? "Available — sign in to link"
+                          : "Not configured on the server"}
+                    </p>
+                  </div>
+                </div>
+                <span
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10px] font-semibold",
+                    isLinked
+                      ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                      : isConfigured
+                        ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                        : "bg-muted text-muted-foreground"
+                  )}
+                >
+                  {isLinked
+                    ? "Connected"
+                    : isConfigured
+                      ? "Available"
+                      : "Not configured"}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
+      </Section>
 
-      <div className="mt-5 rounded-xl border border-dashed bg-muted/20 p-4">
-        <div className="flex items-start gap-3">
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-card ring-1 ring-border">
-            <Database className="size-4 text-muted-foreground" />
+      <Divider />
+
+      <Section
+        title="OAuth redirect URIs"
+        description="Whitelist these exact URLs in each provider's developer console. They're derived from the current origin so they stay correct on prod, preview, and localhost."
+      >
+        {!callbackInfo ? (
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Loader size="xs" /> Loading…
           </div>
-          <div className="flex-1 text-xs">
-            <p className="font-medium text-foreground">Self-host data</p>
-            <p className="mt-0.5 text-muted-foreground">
-              Workspaces, projects, and schemas live in your own Postgres database.
-              See <Link href="/docs#auth" className="text-primary hover:underline">docs / Auth</Link> to wire up additional providers.
+        ) : (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-xs">
+              <span className="text-muted-foreground">Detected origin</span>
+              <code className="font-mono text-foreground">
+                {callbackInfo.origin}
+              </code>
+            </div>
+            <ul className="space-y-2">
+              {callbackInfo.callbacks.map((cb) => (
+                <CallbackCard key={cb.provider} cb={cb} />
+              ))}
+            </ul>
+            <p className="text-[11px] text-muted-foreground">
+              See <Link href="/docs#auth" className="text-primary hover:underline">docs / Auth</Link> for full setup steps and required env vars.
             </p>
           </div>
+        )}
+      </Section>
+    </>
+  );
+}
+
+function CallbackCard({ cb }: { cb: CallbackEntry }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(cb.callbackUrl);
+      setCopied(true);
+      toast.success(`${cb.label} callback URL copied`);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      toast.error("Copy failed");
+    }
+  };
+
+  return (
+    <li className="rounded-xl border bg-muted/30 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium">{cb.label}</p>
+          <span
+            className={cn(
+              "rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
+              cb.enabled
+                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
+                : "bg-muted text-muted-foreground"
+            )}
+            title={cb.envVars.join(", ")}
+          >
+            {cb.enabled ? "Enabled" : "Env vars not set"}
+          </span>
         </div>
+        <a
+          href={cb.consoleUrl}
+          target="_blank"
+          rel="noreferrer"
+          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
+        >
+          Open console <ExternalLink className="size-3" />
+        </a>
       </div>
-    </Section>
+      <div className="mt-2 flex items-stretch gap-2">
+        <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-[11px] text-foreground">
+          {cb.callbackUrl}
+        </code>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={handleCopy}
+          aria-label="Copy callback URL"
+        >
+          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+        </Button>
+      </div>
+      {cb.notes && (
+        <p className="mt-1.5 text-[11px] text-muted-foreground">{cb.notes}</p>
+      )}
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        Required env: <code>{cb.envVars.join(", ")}</code>
+      </p>
+    </li>
   );
 }

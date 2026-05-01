@@ -67,14 +67,24 @@ const SESSION_MAX_AGE = 60 * 60; // 1 hour when "remember me" is unchecked
 
 export const authConfig: NextAuthConfig = {
   session: { strategy: "jwt", maxAge: REMEMBER_MAX_AGE },
+  // Trust the incoming host header. Required when running behind a proxy /
+  // reverse proxy / non-Vercel host so OAuth callbacks resolve against the
+  // public origin instead of localhost. Set AUTH_TRUST_HOST=true in env to
+  // enable explicitly; defaulted on here so dev "just works".
+  trustHost: true,
   pages: {
     signIn: "/sign-in",
   },
   providers: oauthProviders,
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger, session }) {
       if (user?.id) {
         token.id = user.id;
+        // Persist profile fields onto the token so the session reflects
+        // OAuth profile data (Google picture, etc.) without a DB roundtrip.
+        if (user.name) token.name = user.name;
+        if (user.email) token.email = user.email;
+        if (user.image) token.picture = user.image;
         // Credentials provider attaches `remember` to the user object —
         // honor it on first issue. OAuth users always get the long lifetime.
         const remember = (user as { remember?: boolean }).remember;
@@ -82,11 +92,25 @@ export const authConfig: NextAuthConfig = {
           remember === false ? SESSION_MAX_AGE : REMEMBER_MAX_AGE;
         token.exp = Math.floor(Date.now() / 1000) + lifetime;
       }
+      // Allow the client to push profile updates into the JWT via
+      // `useSession().update({ image, name })` — picked up on next render.
+      if (trigger === "update" && session) {
+        const u = (session as { user?: { name?: string; image?: string } })
+          .user;
+        if (u?.name) token.name = u.name;
+        if (u?.image) token.picture = u.image;
+      }
       return token;
     },
     async session({ session, token }) {
-      if (token?.id && session.user) {
-        session.user.id = token.id as string;
+      if (session.user) {
+        if (token?.id) session.user.id = token.id as string;
+        // Mirror token claims onto the session.user object so consumers
+        // can read session.user.image without an extra fetch.
+        if (typeof token?.picture === "string")
+          session.user.image = token.picture;
+        if (typeof token?.name === "string") session.user.name = token.name;
+        if (typeof token?.email === "string") session.user.email = token.email;
       }
       return session;
     },

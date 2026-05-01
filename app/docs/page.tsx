@@ -226,21 +226,70 @@ export default function DocsPage() {
           <Section id="auth" title="Accounts & OAuth" icon={KeyRound}>
             <p>
               The app supports email/password plus optional OAuth via Google,
-              GitHub, and Microsoft. OAuth providers are enabled by setting the
-              following env vars:
+              GitHub, and Microsoft. Each provider activates only when its
+              pair of env vars is set. New OAuth users are auto-seeded with a
+              workspace, project, and schema on first sign-in.
             </p>
-            <pre className="rounded-md border bg-muted/30 p-3 text-xs"><code>{`AUTH_SECRET=...
+
+            <h3>1. Set env vars</h3>
+            <pre className="rounded-md border bg-muted/30 p-3 text-xs"><code>{`# Required
+AUTH_SECRET=...               # 32+ random bytes (run: make auth-secret)
+NEXTAUTH_URL=https://your.host  # exact public origin, no trailing slash
+
+# Google — https://console.cloud.google.com/apis/credentials
 AUTH_GOOGLE_ID=...
 AUTH_GOOGLE_SECRET=...
+
+# GitHub — https://github.com/settings/developers
 AUTH_GITHUB_ID=...
 AUTH_GITHUB_SECRET=...
+
+# Microsoft Entra ID — https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps
 AUTH_MICROSOFT_ID=...
 AUTH_MICROSOFT_SECRET=...
-AUTH_MICROSOFT_TENANT=common  # or your tenant ID`}</code></pre>
+AUTH_MICROSOFT_TENANT=common  # or your tenant GUID`}</code></pre>
+
+            <h3>2. Whitelist redirect URIs in each console</h3>
             <p>
-              Each provider activates only when its pair of env vars is
-              present. New OAuth users are auto-seeded with a workspace,
-              project, and schema on first sign-in.
+              Visit{" "}
+              <Link href="/settings#connections" className="text-primary hover:underline">
+                Settings → Connections
+              </Link>{" "}
+              to see the exact URLs derived from your live origin. Click
+              copy on each one and paste it into the provider&apos;s
+              &quot;Authorized redirect URIs&quot; (or equivalent) field.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              The pattern is always{" "}
+              <code>{`<NEXTAUTH_URL>/api/auth/callback/<provider-id>`}</code>{" "}
+              where the provider IDs are{" "}
+              <code>google</code>, <code>github</code>, and{" "}
+              <code>microsoft-entra-id</code>.
+            </p>
+
+            <h3>3. Per-provider quirks</h3>
+            <ul>
+              <li>
+                <b>Google</b>: also add the bare origin (no path) to
+                &quot;Authorized JavaScript origins&quot;.
+              </li>
+              <li>
+                <b>GitHub</b>: set both &quot;Homepage URL&quot; (origin)
+                and &quot;Authorization callback URL&quot;.
+              </li>
+              <li>
+                <b>Microsoft</b>: register a Web platform redirect URI.
+                Tenant <code>common</code> = multi-tenant; use a tenant GUID
+                for single-tenant apps.
+              </li>
+            </ul>
+
+            <h3>4. Health check the public origin</h3>
+            <p>
+              <code>GET /api/health</code> must return{" "}
+              <code>{`{"ok":true}`}</code> from the same host the OAuth
+              consoles are pointed at — otherwise the redirect will land on
+              an unreachable origin.
             </p>
           </Section>
 
