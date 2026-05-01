@@ -20,6 +20,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -136,21 +137,23 @@ export function AppSidebar() {
             align="start"
             className="w-[var(--anchor-width)] min-w-[220px]"
           >
-            <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
-            {workspaces.map((w) => (
-              <DropdownMenuItem
-                key={w.id}
-                onClick={() => switchWorkspace(w.id)}
-                disabled={w.id === activeWorkspaceId}
-              >
-                {w.id === activeWorkspaceId ? (
-                  <Check />
-                ) : (
-                  <span className="size-3.5" />
-                )}
-                <span className="truncate">{w.name}</span>
-              </DropdownMenuItem>
-            ))}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Workspaces</DropdownMenuLabel>
+              {workspaces.map((w) => (
+                <DropdownMenuItem
+                  key={w.id}
+                  onClick={() => switchWorkspace(w.id)}
+                  disabled={w.id === activeWorkspaceId}
+                >
+                  {w.id === activeWorkspaceId ? (
+                    <Check />
+                  ) : (
+                    <span className="size-3.5" />
+                  )}
+                  <span className="truncate">{w.name}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuGroup>
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={() => setNewWorkspaceOpen(true)}>
               <Plus />

@@ -104,29 +104,6 @@ function CanvasHeader({
       <WorkspaceSwitcher />
       <ProjectSchemaNav />
 
-      <div className="ml-auto hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex">
-        <Database className="size-3 shrink-0" />
-        <span className="truncate max-w-[100px] lg:max-w-[140px]">
-          {workspace?.name ?? "Workspace"}
-        </span>
-        <ChevronRight className="size-3 shrink-0" />
-        {project ? (
-          <Link
-            href={`/projects/${project.id}`}
-            className="flex items-center gap-1 hover:text-foreground"
-          >
-            <FolderOpen className="size-3 shrink-0" />
-            <span className="truncate max-w-[120px] lg:max-w-[160px]">{project.name}</span>
-          </Link>
-        ) : (
-          <span>Project</span>
-        )}
-        <ChevronRight className="size-3 shrink-0" />
-        <FileText className="size-3 shrink-0 text-emerald-500" />
-        <span className="max-w-[140px] truncate font-medium text-foreground lg:max-w-[200px]">
-          {schema?.name ?? "Schema"}
-        </span>
-      </div>
       <div className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
         <FileText className="size-3 shrink-0 text-emerald-500" />
         <span className="max-w-[140px] truncate font-medium text-foreground">

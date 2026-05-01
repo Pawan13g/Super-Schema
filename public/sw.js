@@ -1,7 +1,7 @@
 // Super Schema service worker — minimum needed to satisfy installability
 // criteria and serve a basic offline shell. Bumps cache key on every deploy.
 
-const CACHE_VERSION = "v1";
+const CACHE_VERSION = "v2";
 const STATIC_CACHE = `super-schema-static-${CACHE_VERSION}`;
 
 const PRECACHE_URLS = [
@@ -41,10 +41,14 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(req.url);
 
-  // Don't try to intercept anything off-origin or anything in API/auth.
+  // Don't intercept anything off-origin, anything in API/auth, or anything
+  // that's part of a navigation flow we shouldn't touch (sign-in, sign-up,
+  // OAuth callbacks).
   if (url.origin !== self.location.origin) return;
   if (url.pathname.startsWith("/api/")) return;
   if (url.pathname.startsWith("/_next/data")) return;
+  if (url.pathname.startsWith("/sign-in")) return;
+  if (url.pathname.startsWith("/sign-up")) return;
 
   // Network-first for HTML navigations so we always serve fresh app shell
   // when online; fall back to cached "/" for offline.

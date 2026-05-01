@@ -87,7 +87,25 @@ export async function POST(request: NextRequest) {
 
     return Response.json({ user });
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Sign-up failed";
-    return Response.json({ error: message }, { status: 500 });
+    const raw = err instanceof Error ? err.message : "Sign-up failed";
+    // Surface DB connectivity problems to the user as a 503 with a clearer
+    // message than Prisma's default — same for the auth flow at large.
+    if (
+      raw.includes("Can't reach database server") ||
+      raw.includes("ECONNREFUSED") ||
+      raw.includes("ENOTFOUND") ||
+      raw.includes("DATABASE_URL")
+    ) {
+      console.error("Sign-up failed — database unreachable:", raw);
+      return Response.json(
+        {
+          error:
+            "Database is unreachable. Check DATABASE_URL on the server (must be a full postgresql:// URL). Restart the dev server / redeploy after fixing.",
+        },
+        { status: 503 }
+      );
+    }
+    console.error("Sign-up failed:", raw);
+    return Response.json({ error: raw }, { status: 500 });
   }
 }

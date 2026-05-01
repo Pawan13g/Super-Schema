@@ -15,12 +15,38 @@ export function PwaRegister() {
     useState<BeforeInstallPromptEvent | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
-  // Register the service worker once per session in production. Skipped in
-  // dev so HMR doesn't fight the cache.
+  // Register the service worker once per session in production. In dev we
+  // actively *unregister* any leftover SW from a previous run — a stale
+  // SW intercepts navigations and triggers React internal errors like
+  // "Router action dispatched before initialization".
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (!("serviceWorker" in navigator)) return;
-    if (process.env.NODE_ENV !== "production") return;
+
+    if (process.env.NODE_ENV !== "production") {
+      navigator.serviceWorker
+        .getRegistrations()
+        .then((regs) => {
+          if (regs.length === 0) return;
+          regs.forEach((r) => r.unregister().catch(() => {}));
+          // Force-clear the SW cache too so the next request goes to the
+          // dev server, not whatever the stale SW had stored.
+          if (typeof caches !== "undefined") {
+            caches
+              .keys()
+              .then((keys) =>
+                Promise.all(
+                  keys
+                    .filter((k) => k.startsWith("super-schema-"))
+                    .map((k) => caches.delete(k))
+                )
+              )
+              .catch(() => {});
+          }
+        })
+        .catch(() => {});
+      return;
+    }
 
     const onLoad = () => {
       navigator.serviceWorker

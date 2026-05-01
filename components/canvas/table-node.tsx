@@ -100,18 +100,61 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
     return indicators;
   };
 
+  // Use the primary key (or first column) for table-level top/bottom handles.
+  // Lets the user draw a relation from / to the table without targeting a
+  // specific column row — relation uses the PK as the FK reference.
+  const pkCol =
+    table.columns.find((c) => c.constraints.includes("PRIMARY KEY")) ??
+    table.columns[0];
+
   return (
     <div
-      className="group/node min-w-[220px] overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow-md"
+      className="group/node relative min-w-[220px] rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow-md"
       style={{
         borderColor: selected ? table.color : "var(--color-border)",
         boxShadow: selected ? `0 0 0 2px ${table.color}33` : undefined,
       }}
       onClick={() => onSelect(table.id)}
     >
+      {/* Table-level handles (top + bottom) — anchored to the PK column. */}
+      {pkCol && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Top}
+            id={`${pkCol.id}-target-top`}
+            title="Drag relation to this table"
+            isConnectable
+            style={{
+              background: table.color,
+              color: table.color,
+              cursor: "crosshair",
+              width: 12,
+              height: 12,
+              top: -6,
+            }}
+          />
+          <Handle
+            type="source"
+            position={Position.Bottom}
+            id={`${pkCol.id}-source-bottom`}
+            title="Drag relation from this table"
+            isConnectable
+            style={{
+              background: table.color,
+              color: table.color,
+              cursor: "crosshair",
+              width: 12,
+              height: 12,
+              bottom: -6,
+            }}
+          />
+        </>
+      )}
+
       {/* Pastel header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 border-b"
+        className="flex items-center gap-2 rounded-t-lg border-b px-3 py-2"
         style={{
           backgroundColor: `${table.color}1f`,
           borderColor: `${table.color}33`,
@@ -177,7 +220,7 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
       </div>
 
       {/* Column rows */}
-      <div className="bg-card">
+      <div className="rounded-b-lg bg-card">
         {table.columns.map((col, i) => {
           const isPk = col.constraints.includes("PRIMARY KEY");
           const indicators = getConstraintIndicators(col);
@@ -191,10 +234,18 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
               <Handle
                 type="target"
                 position={Position.Left}
-                id={`${col.id}-target`}
-                title="Drop a relation here"
-                style={{ background: table.color }}
-                className="!-left-[7px] !size-3 !rounded-full !border-2 !border-background !opacity-70 transition-all hover:!scale-125 hover:!opacity-100 group-hover/node:!opacity-100"
+                id={`${col.id}-target-left`}
+                title="Drag to / from here to make a relation"
+                isConnectable
+                style={{
+                  background: table.color,
+                  color: table.color,
+                  zIndex: 20,
+                  cursor: "crosshair",
+                  width: 12,
+                  height: 12,
+                  left: -6,
+                }}
               />
               <span
                 className={`flex items-center gap-1 truncate font-mono ${isPk ? "font-semibold text-foreground" : "text-foreground/90"}`}
@@ -221,18 +272,19 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
               <Handle
                 type="source"
                 position={Position.Right}
-                id={`${col.id}-source`}
+                id={`${col.id}-source-right`}
                 title="Drag to another column to create a relation"
-                style={{ background: table.color }}
-                className="!-right-[7px] !size-3 !rounded-full !border-2 !border-background !opacity-70 transition-all hover:!scale-125 hover:!opacity-100 group-hover/node:!opacity-100"
+                isConnectable
+                style={{
+                  background: table.color,
+                  color: table.color,
+                  zIndex: 20,
+                  cursor: "crosshair",
+                  width: 12,
+                  height: 12,
+                  right: -6,
+                }}
               />
-              <span
-                aria-hidden
-                className="pointer-events-none absolute -right-[7px] top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/node:opacity-100"
-                style={{ color: table.color }}
-              >
-                <Link2 className="size-2.5" />
-              </span>
             </div>
           );
         })}

@@ -1,8 +1,7 @@
 "use client";
 
 import { useState, useEffect, Suspense } from "react";
-import { signIn } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -68,17 +67,11 @@ function BrandPanel() {
   );
 }
 
-// Default landing destination after a successful sign-in. Configured via
-// the NEXT_PUBLIC_DEFAULT_DASHBOARD env var (must start with "/"); falls
-// back to the Projects dashboard.
 const DEFAULT_DASHBOARD =
   (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
     ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
     : "/projects";
 
-// Sanitize the callbackUrl coming back from the redirect chain. Only allow
-// same-origin paths, never bounce back to /sign-in or /sign-up — that's
-// what produced the "/sign-in?callbackUrl=/sign-in?callbackUrl=…" loop.
 function safeCallback(raw: string | null): string {
   if (!raw) return DEFAULT_DASHBOARD;
   try {
@@ -98,10 +91,8 @@ function safeCallback(raw: string | null): string {
 }
 
 function SignInForm() {
-  const router = useRouter();
   const params = useSearchParams();
   const rawCallback = params.get("callbackUrl");
-
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(true);
@@ -120,14 +111,18 @@ function SignInForm() {
       .catch(() => {});
   }, []);
 
-  // NextAuth redirects to /sign-in?error=... when OAuth or credentials fail.
-  // Translate its error codes into a user-friendly message instead of
-  // staying silent.
   useEffect(() => {
     const code = params.get("error");
     if (!code) return;
     const map: Record<string, string> = {
       CredentialsSignin: "Invalid email or password.",
+      MissingCredentials: "Enter both your email and password.",
+      UserNotFound: "No account exists for that email. Sign up first.",
+      InvalidPassword: "Wrong password — try again.",
+      DatabaseUnavailable:
+        "Database is unreachable on the server. Check DATABASE_URL and restart.",
+      OAuthOnlyAccount:
+        "This email signed up via Google / GitHub / Microsoft — use that provider to sign in instead.",
       OAuthAccountNotLinked:
         "That email is already linked to another sign-in method. Use the original method, then connect this provider in Settings.",
       OAuthCallbackError:
@@ -142,8 +137,6 @@ function SignInForm() {
     toast.error(msg);
   }, [params]);
 
-  // Surface a "welcome back" toast after the redirect from the auth callback
-  // (we set this flag right before triggering signIn).
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (sessionStorage.getItem("super-schema:welcome-toast") === "1") {
@@ -152,32 +145,66 @@ function SignInForm() {
     }
   }, []);
 
+  // Manual POST to /api/auth/callback/credentials — bypasses the
+  // next-auth/react signIn helper, which has known v5-beta issues that
+  // prevent the Set-Cookie from reaching the browser on the credentials
+  // path.
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
     const dest = safeCallback(rawCallback);
-    // Stash a flag so the destination page can pop a "welcome back" toast.
-    if (typeof window !== "undefined") {
+
+    try {
+      const csrfRes = await fetch("/api/auth/csrf", {
+        cache: "no-store",
+        credentials: "include",
+      });
+      const { csrfToken } = (await csrfRes.json()) as { csrfToken: string };
+
+      const body = new URLSearchParams();
+      body.append("csrfToken", csrfToken);
+      body.append("email", email.trim().toLowerCase());
+      body.append("password", password);
+      body.append("remember", remember ? "1" : "0");
+      body.append("callbackUrl", dest);
+      body.append("json", "true");
+
+      const res = await fetch("/api/auth/callback/credentials", {
+        method: "POST",
+        body,
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        credentials: "include",
+        redirect: "follow",
+      });
+      const finalUrl = new URL(res.url, window.location.origin);
+
+      const errCode = finalUrl.searchParams.get("error");
+      if (errCode) {
+        const map: Record<string, string> = {
+          CredentialsSignin: "Invalid email or password.",
+          MissingCredentials: "Enter both your email and password.",
+          UserNotFound: "No account exists for that email. Sign up first.",
+          InvalidPassword: "Wrong password — try again.",
+          OAuthOnlyAccount:
+            "This email signed up via Google / GitHub / Microsoft — use that provider instead.",
+          DatabaseUnavailable:
+            "Database is unreachable on the server. Check DATABASE_URL.",
+        };
+        setError(map[errCode] ?? `Sign-in failed (${errCode}).`);
+        toast.error(map[errCode] ?? `Sign-in failed (${errCode}).`);
+        setLoading(false);
+        return;
+      }
+
       sessionStorage.setItem("super-schema:welcome-toast", "1");
+      window.location.assign(dest);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Sign-in failed";
+      setError(msg);
+      toast.error(msg);
+      setLoading(false);
     }
-    // Use NextAuth's own redirect flow. It performs a single response that
-    // both Sets the session cookie and navigates to `callbackUrl` — no
-    // client-side cookie race, no middleware bounce, no chained URLs.
-    // On invalid credentials, NextAuth comes back to /sign-in?error=CredentialsSignin
-    // which the effect above translates into a toast + inline error.
-    await signIn("credentials", {
-      email: email.trim().toLowerCase(),
-      password,
-      remember: remember ? "1" : "0",
-      redirect: true,
-      callbackUrl: dest,
-    });
-    // If we reach this line the redirect didn't fire (browser blocked it,
-    // or NextAuth returned synchronously) — clear the flag so a stale
-    // welcome toast doesn't fire on the next visit.
-    sessionStorage.removeItem("super-schema:welcome-toast");
-    setLoading(false);
   };
 
   const callbackUrl = safeCallback(rawCallback);

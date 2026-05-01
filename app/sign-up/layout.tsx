@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Create a free account",
@@ -18,6 +20,19 @@ export const metadata: Metadata = {
   },
 };
 
-export default function SignUpLayout({ children }: { children: React.ReactNode }) {
+const DEFAULT_DASHBOARD =
+  (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+    ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+    : "/projects";
+
+export default async function SignUpLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth();
+  if (session?.user) {
+    redirect(DEFAULT_DASHBOARD);
+  }
   return children;
 }

@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { isMac, modKey, shiftKey } from "@/lib/shortcuts";
 
 interface Shortcut {
   keys: string[];
@@ -16,36 +17,50 @@ interface Shortcut {
 
 const SECTIONS: { title: string; items: Shortcut[] }[] = [
   {
-    title: "Canvas",
+    title: "File",
     items: [
-      { keys: ["Ctrl/⌘", "Z"], label: "Undo" },
-      { keys: ["Ctrl/⌘", "Shift", "Z"], label: "Redo" },
-      { keys: ["Ctrl/⌘", "Y"], label: "Redo (alt)" },
-      { keys: ["Right-click"], label: "Context menu (table / edge / pane)" },
-      { keys: ["Drag handle"], label: "Create a relation between columns" },
-      { keys: ["Double-click"], label: "Rename a table" },
+      { keys: [modKey, "S"], label: "Save schema now" },
+      { keys: [modKey, "N"], label: "New table" },
+      { keys: [modKey, "T"], label: "New table (alt)" },
     ],
   },
   {
-    title: "Editor",
+    title: "Edit",
     items: [
-      { keys: ["Ctrl/⌘", "T"], label: "Add table" },
-      { keys: ["Ctrl/⌘", "N"], label: "New schema" },
+      { keys: [modKey, "Z"], label: "Undo" },
+      { keys: [modKey, shiftKey, "Z"], label: "Redo" },
+      { keys: [modKey, "Y"], label: "Redo (alt)" },
+      { keys: [modKey, "C"], label: "Copy selected table" },
+      { keys: [modKey, "V"], label: "Paste table" },
+      { keys: [modKey, "D"], label: "Duplicate selected table" },
+      { keys: ["Delete"], label: "Delete selected table" },
+      { keys: ["Backspace"], label: "Delete selected table (alt)" },
+      { keys: [modKey, "A"], label: "Select all tables" },
+      { keys: ["Esc"], label: "Clear selection / close menus" },
+    ],
+  },
+  {
+    title: "Canvas",
+    items: [
+      { keys: ["Right-click"], label: "Context menu (table / edge / pane)" },
+      { keys: ["Drag handle"], label: "Create a relation between columns" },
+      { keys: ["Double-click"], label: "Rename table" },
+      { keys: ["Mouse wheel"], label: "Zoom" },
+      { keys: ["Space + drag"], label: "Pan canvas" },
     ],
   },
   {
     title: "Search & navigation",
     items: [
-      { keys: ["Ctrl/⌘", "K"], label: "Open command palette" },
+      { keys: [modKey, "K"], label: "Open command palette" },
       { keys: ["?"], label: "Show this shortcuts overlay" },
-      { keys: ["Esc"], label: "Close menus and dialogs" },
     ],
   },
   {
     title: "AI chat",
     items: [
       { keys: ["Enter"], label: "Send message" },
-      { keys: ["Shift", "Enter"], label: "Newline" },
+      { keys: [shiftKey, "Enter"], label: "Newline" },
     ],
   },
 ];
@@ -61,7 +76,6 @@ export function ShortcutsOverlay() {
       return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
     };
     const handler = (e: KeyboardEvent) => {
-      // "?" with no modifiers, not while typing.
       if (e.key === "?" && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (isEditable(e.target)) return;
         e.preventDefault();
@@ -74,14 +88,15 @@ export function ShortcutsOverlay() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>Keyboard shortcuts</DialogTitle>
           <DialogDescription>
-            Press <Kbd>?</Kbd> anytime to open this overlay.
+            Press <Kbd>?</Kbd> anytime. Modifiers shown for{" "}
+            <b>{isMac ? "macOS" : "Windows / Linux"}</b>.
           </DialogDescription>
         </DialogHeader>
-        <div className="grid max-h-[60vh] grid-cols-1 gap-5 overflow-y-auto sm:grid-cols-2">
+        <div className="grid max-h-[65vh] grid-cols-1 gap-x-6 gap-y-5 overflow-y-auto sm:grid-cols-2">
           {SECTIONS.map((section) => (
             <div key={section.title}>
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">

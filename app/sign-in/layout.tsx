@@ -1,4 +1,6 @@
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
+import { auth } from "@/lib/auth";
 
 export const metadata: Metadata = {
   title: "Sign in",
@@ -18,6 +20,23 @@ export const metadata: Metadata = {
   },
 };
 
-export default function SignInLayout({ children }: { children: React.ReactNode }) {
+const DEFAULT_DASHBOARD =
+  (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+    ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+    : "/projects";
+
+// Server-side guard: if the user already has a valid session, skip the
+// sign-in form and route straight to the dashboard. Backstops the edge
+// middleware in case it can't read the cookie for any reason — eliminates
+// the "logged in but stuck on /sign-in" symptom.
+export default async function SignInLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth();
+  if (session?.user) {
+    redirect(DEFAULT_DASHBOARD);
+  }
   return children;
 }

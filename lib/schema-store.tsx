@@ -46,6 +46,8 @@ interface SchemaStore {
     targetTableId: string,
     targetColumnId: string
   ) => string | null;
+  duplicateTable: (tableId: string, options?: { select?: boolean }) => string | null;
+  insertTable: (table: Table) => string;
   importAiSchema: (generated: GeneratedSchema) => void;
   replaceSchema: (next: Schema) => void;
   // History
@@ -422,7 +424,76 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  // remaining mutations use wrapped setSchema directly; declared below.
+  const duplicateTable = useCallback(
+    (tableId: string, options: { select?: boolean } = {}): string | null => {
+      let newId: string | null = null;
+      setSchema((prev) => {
+        const src = prev.tables.find((t) => t.id === tableId);
+        if (!src) return prev;
+        newId = genId("tbl");
+        // Avoid name collisions: append "_copy", "_copy_2", etc.
+        let candidate = `${src.name}_copy`;
+        let counter = 2;
+        while (prev.tables.some((t) => t.name === candidate)) {
+          candidate = `${src.name}_copy_${counter++}`;
+        }
+        const cloned: Table = {
+          id: newId,
+          name: candidate,
+          color: src.color,
+          columns: src.columns.map((c) => ({
+            ...c,
+            id: genId("col"),
+          })),
+          indexes: (src.indexes ?? []).map((idx) => ({
+            ...idx,
+            id: genId("idx"),
+          })),
+          comment: src.comment,
+          position: {
+            x: (src.position.x ?? 0) + 40,
+            y: (src.position.y ?? 0) + 40,
+          },
+        };
+        return { ...prev, tables: [...prev.tables, cloned] };
+      });
+      if (newId && options.select) setSelectedTableId(newId);
+      return newId;
+    },
+    [setSchema]
+  );
+
+  const insertTable = useCallback(
+    (table: Table): string => {
+      const newId = genId("tbl");
+      setSchema((prev) => {
+        // Ensure name uniqueness on paste.
+        let candidate = table.name;
+        let counter = 2;
+        while (prev.tables.some((t) => t.name === candidate)) {
+          candidate = `${table.name}_${counter++}`;
+        }
+        const cloned: Table = {
+          ...table,
+          id: newId,
+          name: candidate,
+          columns: table.columns.map((c) => ({ ...c, id: genId("col") })),
+          indexes: (table.indexes ?? []).map((idx) => ({
+            ...idx,
+            id: genId("idx"),
+          })),
+          position: {
+            x: (table.position.x ?? 0) + 40,
+            y: (table.position.y ?? 0) + 40,
+          },
+        };
+        return { ...prev, tables: [...prev.tables, cloned] };
+      });
+      setSelectedTableId(newId);
+      return newId;
+    },
+    [setSchema]
+  );
 
   const importAiSchemaImpl = (generated: GeneratedSchema): Schema => {
     const GRID_X = 300;
@@ -527,6 +598,8 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         addRelation,
         removeRelation,
         createJunctionTable,
+        duplicateTable,
+        insertTable,
         importAiSchema,
         replaceSchema,
         undo,

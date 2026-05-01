@@ -70,6 +70,7 @@ interface WorkspaceStore {
   refreshWorkspaces: () => Promise<WorkspaceMeta[] | undefined>;
   refreshProjects: (workspaceId: string) => Promise<ProjectMeta[] | undefined>;
   refreshSchemas: (projectId: string) => Promise<SchemaMeta[] | undefined>;
+  saveNow: () => Promise<void>;
 }
 
 const WorkspaceContext = createContext<WorkspaceStore | null>(null);
@@ -598,6 +599,70 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [schema, activeSchemaId, loadSchemaIntoCanvas]);
 
+  // Force-flush any pending debounced save and PATCH the current schema
+  // immediately. Used by the Ctrl/Cmd+S keyboard shortcut.
+  const saveNow = useCallback(async () => {
+    const targetSchemaId = activeSchemaIdRef.current;
+    if (!targetSchemaId) return;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+    const serialized = JSON.stringify(schema);
+    if (serialized === lastSavedSchemaRef.current) {
+      toast.success("Already saved");
+      return;
+    }
+    const myToken = ++saveTokenRef.current;
+    const expectedVersion = loadedVersionRef.current;
+    setSaveStatus("saving");
+    try {
+      const res = await fetch(`/api/schemas/${targetSchemaId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schemaJson: schema,
+          ...(expectedVersion !== null ? { expectedVersion } : {}),
+        }),
+      });
+      if (myToken !== saveTokenRef.current) return;
+      if (activeSchemaIdRef.current !== targetSchemaId) return;
+
+      if (res.status === 409) {
+        setSaveStatus("error");
+        toast.error("Schema was edited elsewhere. Reloading latest…");
+        await loadSchemaIntoCanvas(targetSchemaId);
+        return;
+      }
+      if (res.ok) {
+        lastSavedSchemaRef.current = serialized;
+        try {
+          const data = (await res.json()) as {
+            schema?: { version?: number };
+          };
+          if (typeof data.schema?.version === "number") {
+            loadedVersionRef.current = data.schema.version;
+          } else if (loadedVersionRef.current !== null) {
+            loadedVersionRef.current += 1;
+          }
+        } catch {
+          if (loadedVersionRef.current !== null) loadedVersionRef.current += 1;
+        }
+        setSaveStatus("saved");
+        toast.success("Saved");
+        setTimeout(() => {
+          if (myToken === saveTokenRef.current) setSaveStatus("idle");
+        }, 1500);
+      } else {
+        setSaveStatus("error");
+        toast.error("Save failed");
+      }
+    } catch (err) {
+      setSaveStatus("error");
+      toast.error(err instanceof Error ? err.message : "Save failed");
+    }
+  }, [schema, loadSchemaIntoCanvas]);
+
   return (
     <WorkspaceContext.Provider
       value={{
@@ -625,6 +690,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         refreshWorkspaces,
         refreshProjects,
         refreshSchemas,
+        saveNow,
       }}
     >
       {children}

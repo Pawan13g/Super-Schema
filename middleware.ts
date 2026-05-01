@@ -20,8 +20,18 @@ export default auth((req) => {
 
   if (
     pathname.startsWith("/api/auth") ||
+    pathname.startsWith("/api/health") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
+    pathname === "/sw.js" ||
+    pathname === "/manifest.webmanifest" ||
+    pathname === "/robots.txt" ||
+    pathname === "/sitemap.xml" ||
+    pathname === "/opengraph-image" ||
+    pathname === "/twitter-image" ||
+    pathname === "/icon" ||
+    pathname === "/apple-icon" ||
+    pathname.startsWith("/.well-known/") ||
     /\.(?:wasm|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|map)$/i.test(pathname)
   ) {
     return NextResponse.next();
@@ -29,6 +39,7 @@ export default auth((req) => {
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
   const isLoggedIn = !!req.auth;
+
   if (!isLoggedIn && !isPublic) {
     const url = new URL("/sign-in", req.url);
     url.searchParams.set("callbackUrl", pathname);
@@ -37,7 +48,11 @@ export default auth((req) => {
 
   const isAuthRoute = PUBLIC_REDIRECT_PATHS.some((p) => pathname.startsWith(p));
   if (isLoggedIn && isAuthRoute) {
-    return NextResponse.redirect(new URL("/", req.url));
+    const dashboard =
+      (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+        ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+        : "/projects";
+    return NextResponse.redirect(new URL(dashboard, req.url));
   }
 
   return NextResponse.next();

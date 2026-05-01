@@ -11,6 +11,7 @@ import {
   ControlButton,
   MiniMap,
   applyNodeChanges,
+  ConnectionMode,
   type Node,
   type Edge,
   type OnNodesChange,
@@ -22,7 +23,10 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { useSchema } from "@/lib/schema-store";
+import { useWorkspace } from "@/lib/workspace-context";
 import { useIsMobile } from "@/lib/use-media-query";
+import { isMod, isTypingTarget } from "@/lib/shortcuts";
+import type { Table } from "@/lib/types";
 import { TableNode } from "./table-node";
 import {
   ContextMenu,
@@ -74,11 +78,14 @@ export function SchemaCanvas() {
     removeTable,
     removeRelation,
     createJunctionTable,
+    duplicateTable,
+    insertTable,
     undo,
     redo,
     canUndo,
     canRedo,
   } = useSchema();
+  const { saveNow } = useWorkspace();
 
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
@@ -94,6 +101,14 @@ export function SchemaCanvas() {
   // node objects mid-drag and lose the drag delta.
   const draggingRef = useRef(false);
   const pendingSyncRef = useRef(false);
+  // Always-current selectedTableId — keyboard handler reads via ref to
+  // avoid stale closures.
+  const selectedTableIdRef = useRef(selectedTableId);
+  useEffect(() => {
+    selectedTableIdRef.current = selectedTableId;
+  }, [selectedTableId]);
+  // In-memory clipboard for Ctrl/Cmd+C → Ctrl/Cmd+V table copy/paste.
+  const clipboardRef = useRef<Table | null>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [relationDialogOpen, setRelationDialogOpen] = useState(false);
@@ -265,32 +280,112 @@ export function SchemaCanvas() {
     syncNodesFromSchema();
   }, [syncNodesFromSchema]);
 
-  // Undo/redo keyboard shortcuts (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y).
-  // Ignored while focus is in an editable element so we don't hijack the
-  // browser's native input undo.
+  // Canvas keyboard shortcuts. All bail out of typing surfaces (input,
+  // textarea, contenteditable) so they never hijack form input.
   useEffect(() => {
-    const isEditable = (el: EventTarget | null) => {
-      if (!(el instanceof HTMLElement)) return false;
-      if (el.isContentEditable) return true;
-      const tag = el.tagName;
-      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-    };
     const handler = (e: KeyboardEvent) => {
-      if (isEditable(e.target)) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
+      if (isTypingTarget(e.target)) return;
+      const mod = isMod(e);
       const k = e.key.toLowerCase();
-      if (k === "z" && !e.shiftKey) {
+
+      // Undo / redo
+      if (mod && k === "z" && !e.shiftKey) {
         e.preventDefault();
         undo();
-      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        return;
+      }
+      if (mod && ((k === "z" && e.shiftKey) || k === "y")) {
         e.preventDefault();
         redo();
+        return;
+      }
+
+      // Save (force-flush)
+      if (mod && k === "s") {
+        e.preventDefault();
+        void saveNow();
+        return;
+      }
+
+      // Copy / Paste / Duplicate (operates on the selected table)
+      if (mod && k === "c" && selectedTableIdRef.current) {
+        e.preventDefault();
+        const t = schema.tables.find(
+          (x) => x.id === selectedTableIdRef.current
+        );
+        if (t) {
+          clipboardRef.current = t;
+          toast.success(`Copied table "${t.name}"`);
+        }
+        return;
+      }
+      if (mod && k === "v") {
+        e.preventDefault();
+        const t = clipboardRef.current;
+        if (!t) {
+          toast.error("Clipboard empty");
+          return;
+        }
+        insertTable(t);
+        toast.success(`Pasted "${t.name}"`);
+        return;
+      }
+      if (mod && k === "d" && selectedTableIdRef.current) {
+        e.preventDefault();
+        const id = duplicateTable(selectedTableIdRef.current, { select: true });
+        if (id) toast.success("Duplicated table");
+        return;
+      }
+
+      // New schema / new table
+      if (mod && k === "n") {
+        e.preventDefault();
+        addTable(`table_${schema.tables.length + 1}`);
+        return;
+      }
+      if (mod && k === "t") {
+        e.preventDefault();
+        addTable(`table_${schema.tables.length + 1}`);
+        return;
+      }
+
+      // Select all (multi-select on canvas)
+      if (mod && k === "a") {
+        const inst = reactFlowInstanceRef.current;
+        if (!inst) return;
+        e.preventDefault();
+        inst.setNodes((ns) => ns.map((n) => ({ ...n, selected: true })));
+        return;
+      }
+
+      // Delete selected
+      if ((k === "delete" || k === "backspace") && !mod) {
+        const id = selectedTableIdRef.current;
+        if (!id) return;
+        e.preventDefault();
+        setConfirm({ kind: "delete-table", tableId: id });
+        return;
+      }
+
+      // Escape — clear selection / close menus
+      if (k === "escape") {
+        setSelectedTableId(null);
+        setMenu(null);
+        return;
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [undo, redo]);
+  }, [
+    undo,
+    redo,
+    saveNow,
+    addTable,
+    duplicateTable,
+    insertTable,
+    schema.tables,
+    setSelectedTableId,
+  ]);
 
   const edges: Edge[] = schema.relations.map((rel) => {
     const sourceTable = schema.tables.find((t) => t.id === rel.sourceTable);
@@ -299,8 +394,8 @@ export function SchemaCanvas() {
       id: rel.id,
       source: rel.sourceTable,
       target: rel.targetTable,
-      sourceHandle: `${rel.sourceColumn}-source`,
-      targetHandle: `${rel.targetColumn}-target`,
+      sourceHandle: `${rel.sourceColumn}-source-right`,
+      targetHandle: `${rel.targetColumn}-target-left`,
       type: "smoothstep",
       animated: true,
       label:
@@ -351,16 +446,20 @@ export function SchemaCanvas() {
   const onConnect = useCallback(
     (connection: Connection) => {
       if (!connection.source || !connection.target) return;
-      if (connection.source === connection.target) return; // no self-table loops via drag
-      const sourceCol =
-        connection.sourceHandle
-          ?.replace("-pk-source", "")
-          .replace("-source", "") ?? "";
-      const targetCol =
-        connection.targetHandle?.replace("-target", "") ?? "";
+      if (connection.source === connection.target) return;
+
+      // Strip any directional suffix (-target / -source / position).
+      // Handle ids look like "<colId>-source-right", "<colId>-target-left",
+      // or the legacy "<colId>-source" / "<colId>-target".
+      const stripSuffix = (h: string | null | undefined) =>
+        (h ?? "")
+          .replace(/-(source|target)(-(left|right|top|bottom))?$/, "")
+          .trim();
+
+      const sourceCol = stripSuffix(connection.sourceHandle);
+      const targetCol = stripSuffix(connection.targetHandle);
       if (!sourceCol || !targetCol) return;
 
-      // Stash and prompt for relation type
       setPendingConnection({
         sourceTableId: connection.source,
         sourceColumnId: sourceCol,
@@ -661,11 +760,13 @@ export function SchemaCanvas() {
         onPaneContextMenu={onPaneContextMenu}
         isValidConnection={isValidConnection}
         connectionLineStyle={{
-          stroke: "#8b5cf6",
+          stroke: "var(--color-primary)",
           strokeWidth: 2,
-          strokeDasharray: "4 4",
+          strokeDasharray: "5 4",
         }}
-        connectionRadius={28}
+        connectionRadius={40}
+        connectOnClick={false}
+        connectionMode={ConnectionMode.Loose}
         fitView
         colorMode={colorMode}
         proOptions={{ hideAttribution: true }}
