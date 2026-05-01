@@ -60,15 +60,28 @@ export const enabledOAuthProviders = {
   ),
 };
 
+// Default session lifetime (30 days). Per-login overrides happen inside the
+// jwt callback by setting token.exp directly.
+const REMEMBER_MAX_AGE = 30 * 24 * 60 * 60;
+const SESSION_MAX_AGE = 60 * 60; // 1 hour when "remember me" is unchecked
+
 export const authConfig: NextAuthConfig = {
-  session: { strategy: "jwt" },
+  session: { strategy: "jwt", maxAge: REMEMBER_MAX_AGE },
   pages: {
     signIn: "/sign-in",
   },
   providers: oauthProviders,
   callbacks: {
     async jwt({ token, user }) {
-      if (user?.id) token.id = user.id;
+      if (user?.id) {
+        token.id = user.id;
+        // Credentials provider attaches `remember` to the user object —
+        // honor it on first issue. OAuth users always get the long lifetime.
+        const remember = (user as { remember?: boolean }).remember;
+        const lifetime =
+          remember === false ? SESSION_MAX_AGE : REMEMBER_MAX_AGE;
+        token.exp = Math.floor(Date.now() / 1000) + lifetime;
+      }
       return token;
     },
     async session({ session, token }) {
@@ -76,6 +89,23 @@ export const authConfig: NextAuthConfig = {
         session.user.id = token.id as string;
       }
       return session;
+    },
+    async redirect({ url, baseUrl }) {
+      // Block bouncing back to the auth pages — fixes the
+      // /sign-in?callbackUrl=/sign-in… loop.
+      try {
+        const target = new URL(url, baseUrl);
+        if (target.origin !== baseUrl) return baseUrl;
+        if (
+          target.pathname.startsWith("/sign-in") ||
+          target.pathname.startsWith("/sign-up")
+        ) {
+          return baseUrl;
+        }
+        return target.toString();
+      } catch {
+        return baseUrl;
+      }
     },
   },
 };

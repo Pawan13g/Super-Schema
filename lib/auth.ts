@@ -9,6 +9,8 @@ import { authConfig } from "./auth.config";
 const credentialsSchema = z.object({
   email: z.string().email(),
   password: z.string().min(1),
+  // "1" = persistent (30 days), "0" = transient session (1 hour).
+  remember: z.enum(["0", "1"]).optional(),
 });
 
 async function seedUserDefaults(userId: string) {
@@ -50,11 +52,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       credentials: {
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
+        remember: { label: "Remember me", type: "text" },
       },
       async authorize(creds) {
         const parsed = credentialsSchema.safeParse(creds);
         if (!parsed.success) return null;
-        const { email, password } = parsed.data;
+        const { password, remember } = parsed.data;
+        // Email lookup is case-insensitive — sign-up stores lowercased.
+        const email = parsed.data.email.trim().toLowerCase();
 
         const user = await prisma.user.findUnique({ where: { email } });
         if (!user?.passwordHash) return null;
@@ -67,7 +72,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           email: user.email,
           name: user.name,
           image: user.image,
-        };
+          // Smuggled through to the jwt callback — sets per-session expiry.
+          remember: remember !== "0",
+        } as never;
       },
     }),
   ],

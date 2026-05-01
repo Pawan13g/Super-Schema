@@ -68,13 +68,43 @@ function BrandPanel() {
   );
 }
 
+// Default landing destination after a successful sign-in. Configured via
+// the NEXT_PUBLIC_DEFAULT_DASHBOARD env var (must start with "/"); falls
+// back to the Projects dashboard.
+const DEFAULT_DASHBOARD =
+  (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+    ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+    : "/projects";
+
+// Sanitize the callbackUrl coming back from the redirect chain. Only allow
+// same-origin paths, never bounce back to /sign-in or /sign-up — that's
+// what produced the "/sign-in?callbackUrl=/sign-in?callbackUrl=…" loop.
+function safeCallback(raw: string | null): string {
+  if (!raw) return DEFAULT_DASHBOARD;
+  try {
+    let path = raw;
+    if (raw.startsWith("http://") || raw.startsWith("https://")) {
+      const u = new URL(raw);
+      if (u.origin !== window.location.origin) return DEFAULT_DASHBOARD;
+      path = u.pathname + u.search + u.hash;
+    }
+    if (!path.startsWith("/")) return DEFAULT_DASHBOARD;
+    if (path.startsWith("/sign-in") || path.startsWith("/sign-up"))
+      return DEFAULT_DASHBOARD;
+    return path;
+  } catch {
+    return DEFAULT_DASHBOARD;
+  }
+}
+
 function SignInForm() {
   const router = useRouter();
   const params = useSearchParams();
-  const callbackUrl = params.get("callbackUrl") ?? "/";
+  const rawCallback = params.get("callbackUrl");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [availability, setAvailability] = useState<OAuthAvailability>({
@@ -90,12 +120,14 @@ function SignInForm() {
       .catch(() => {});
   }, []);
 
-  // NextAuth redirects to /sign-in?error=... when OAuth fails. Translate
-  // its error codes into a user-friendly message instead of staying silent.
+  // NextAuth redirects to /sign-in?error=... when OAuth or credentials fail.
+  // Translate its error codes into a user-friendly message instead of
+  // staying silent.
   useEffect(() => {
     const code = params.get("error");
     if (!code) return;
     const map: Record<string, string> = {
+      CredentialsSignin: "Invalid email or password.",
       OAuthAccountNotLinked:
         "That email is already linked to another sign-in method. Use the original method, then connect this provider in Settings.",
       OAuthCallbackError:
@@ -110,22 +142,45 @@ function SignInForm() {
     toast.error(msg);
   }, [params]);
 
+  // Surface a "welcome back" toast after the redirect from the auth callback
+  // (we set this flag right before triggering signIn).
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (sessionStorage.getItem("super-schema:welcome-toast") === "1") {
+      sessionStorage.removeItem("super-schema:welcome-toast");
+      toast.success("Welcome back!");
+    }
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const res = await signIn("credentials", { email, password, redirect: false });
-    setLoading(false);
-    if (res?.error) {
-      setError("Invalid email or password.");
-      toast.error("Invalid email or password.");
-      return;
+    const dest = safeCallback(rawCallback);
+    // Stash a flag so the destination page can pop a "welcome back" toast.
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("super-schema:welcome-toast", "1");
     }
-    toast.success("Welcome back!");
-    router.push(callbackUrl);
-    router.refresh();
+    // Use NextAuth's own redirect flow. It performs a single response that
+    // both Sets the session cookie and navigates to `callbackUrl` — no
+    // client-side cookie race, no middleware bounce, no chained URLs.
+    // On invalid credentials, NextAuth comes back to /sign-in?error=CredentialsSignin
+    // which the effect above translates into a toast + inline error.
+    await signIn("credentials", {
+      email: email.trim().toLowerCase(),
+      password,
+      remember: remember ? "1" : "0",
+      redirect: true,
+      callbackUrl: dest,
+    });
+    // If we reach this line the redirect didn't fire (browser blocked it,
+    // or NextAuth returned synchronously) — clear the flag so a stale
+    // welcome toast doesn't fire on the next visit.
+    sessionStorage.removeItem("super-schema:welcome-toast");
+    setLoading(false);
   };
 
+  const callbackUrl = safeCallback(rawCallback);
   const anyOAuth = availability.google || availability.github || availability.microsoft;
 
   return (
@@ -177,6 +232,22 @@ function SignInForm() {
               className="h-10"
             />
           </div>
+
+          <label className="flex cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={remember}
+              onChange={(e) => setRemember(e.target.checked)}
+              disabled={loading}
+              className="size-4 cursor-pointer accent-primary"
+            />
+            <span>
+              Remember me on this device
+              <span className="ml-1 text-[10px] opacity-70">
+                ({remember ? "30 days" : "1 hour"})
+              </span>
+            </span>
+          </label>
 
           {error && (
             <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">

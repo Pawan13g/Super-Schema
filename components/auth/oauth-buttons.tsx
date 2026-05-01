@@ -17,8 +17,13 @@ interface OAuthButtonsProps {
   availability: OAuthAvailability;
 }
 
+const DEFAULT_DASHBOARD =
+  (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+    ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+    : "/projects";
+
 export function OAuthButtons({
-  callbackUrl = "/",
+  callbackUrl = DEFAULT_DASHBOARD,
   availability,
 }: OAuthButtonsProps) {
   const [pending, setPending] = useState<string | null>(null);

@@ -115,15 +115,26 @@ export default function SignUpPage() {
       return;
     }
 
-    const signed = await signIn("credentials", { email, password, redirect: false });
-    setLoading(false);
-    if (signed?.error) {
-      router.push("/sign-in");
-      return;
+    toast.success("Account created — signing you in…");
+    if (typeof window !== "undefined") {
+      sessionStorage.setItem("super-schema:welcome-toast", "1");
     }
-    toast.success("Account created — welcome!");
-    router.push("/");
-    router.refresh();
+    // Default landing destination configurable via NEXT_PUBLIC_DEFAULT_DASHBOARD.
+    const dashboard =
+      (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
+        ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
+        : "/projects";
+    // Use NextAuth's redirect flow — server response carries both the
+    // session cookie and the redirect, avoiding the cookie/middleware race.
+    await signIn("credentials", {
+      email: email.trim().toLowerCase(),
+      password,
+      remember: "1",
+      redirect: true,
+      callbackUrl: dashboard,
+    });
+    sessionStorage.removeItem("super-schema:welcome-toast");
+    setLoading(false);
   };
 
   return (
