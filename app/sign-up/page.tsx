@@ -1,13 +1,16 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Database, Layers, Sparkles, Zap } from "lucide-react";
+import { Loader } from "@/components/ui/loader";
+import { OAuthButtons, type OAuthAvailability } from "@/components/auth/oauth-buttons";
+import { Database, Layers, Sparkles, Zap } from "lucide-react";
 
 function BrandPanel() {
   return (
@@ -70,8 +73,24 @@ export default function SignUpPage() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // Honeypot — hidden, real users leave blank, bots fill all fields.
+  const [hpCompany, setHpCompany] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [availability, setAvailability] = useState<OAuthAvailability>({
+    google: false,
+    github: false,
+    microsoft: false,
+  });
+
+  useEffect(() => {
+    fetch("/api/auth/providers")
+      .then((r) => r.json())
+      .then(setAvailability)
+      .catch(() => {});
+  }, []);
+
+  const anyOAuth = availability.google || availability.github || availability.microsoft;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -81,11 +100,17 @@ export default function SignUpPage() {
     const res = await fetch("/api/sign-up", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, email, password }),
+      body: JSON.stringify({
+        name,
+        email: email.trim().toLowerCase(),
+        password,
+        hp_company: hpCompany,
+      }),
     });
     const data = await res.json();
     if (!res.ok) {
       setError(data.error ?? "Sign-up failed.");
+      toast.error(data.error ?? "Sign-up failed.");
       setLoading(false);
       return;
     }
@@ -96,6 +121,7 @@ export default function SignUpPage() {
       router.push("/sign-in");
       return;
     }
+    toast.success("Account created — welcome!");
     router.push("/");
     router.refresh();
   };
@@ -121,6 +147,22 @@ export default function SignUpPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Honeypot — visually hidden, off-screen, no autocomplete. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute -left-[9999px] h-0 w-0 overflow-hidden"
+            >
+              <label>
+                Company (leave blank)
+                <input
+                  type="text"
+                  tabIndex={-1}
+                  autoComplete="off"
+                  value={hpCompany}
+                  onChange={(e) => setHpCompany(e.target.value)}
+                />
+              </label>
+            </div>
             <div className="space-y-1.5">
               <Label htmlFor="name">Full name</Label>
               <Input
@@ -170,9 +212,25 @@ export default function SignUpPage() {
             )}
 
             <Button type="submit" disabled={loading} className="h-10 w-full">
-              {loading ? <Loader2 className="size-4 animate-spin" /> : "Create free account"}
+              {loading ? <Loader size="sm" /> : "Create free account"}
             </Button>
           </form>
+
+          {anyOAuth && (
+            <>
+              <div className="relative">
+                <div className="absolute inset-0 flex items-center">
+                  <span className="w-full border-t" />
+                </div>
+                <div className="relative flex justify-center text-[10px] uppercase tracking-wider">
+                  <span className="bg-background px-2 text-muted-foreground">
+                    Or sign up with
+                  </span>
+                </div>
+              </div>
+              <OAuthButtons callbackUrl="/" availability={availability} />
+            </>
+          )}
 
           <p className="text-center text-xs text-muted-foreground">
             By signing up you agree to our{" "}

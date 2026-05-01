@@ -19,6 +19,25 @@ model User {
   accounts   Account[]
   sessions   Session[]
   workspaces Workspace[]
+  settings   UserSettings?
+}
+
+model UserSettings {
+  id           String   @id @default(cuid())
+  userId       String   @unique
+  // "google" | "openai" | "anthropic" | "mistral" | "openrouter" | "grok" | "bedrock" | null
+  aiProvider   String?
+  aiModel      String?
+  apiKeyEnc    String?  @db.Text
+  // Bedrock secret (AWS secret access key). Encrypted same as apiKeyEnc.
+  apiSecretEnc String?  @db.Text
+  // Bedrock region (e.g. us-east-1). Plaintext.
+  region       String?
+  aiEnabled    Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
 
 model Account {

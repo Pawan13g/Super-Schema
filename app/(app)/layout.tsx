@@ -1,5 +1,7 @@
 import { SchemaProvider } from "@/lib/schema-store";
 import { WorkspaceProvider } from "@/lib/workspace-context";
+import { ShortcutsOverlay } from "@/components/workspace/shortcuts-overlay";
+import { CommandPalette } from "@/components/workspace/command-palette";
 
 export default function AppShellLayout({
   children,
@@ -8,7 +10,11 @@ export default function AppShellLayout({
 }) {
   return (
     <SchemaProvider>
-      <WorkspaceProvider>{children}</WorkspaceProvider>
+      <WorkspaceProvider>
+        {children}
+        <ShortcutsOverlay />
+        <CommandPalette />
+      </WorkspaceProvider>
     </SchemaProvider>
   );
 }

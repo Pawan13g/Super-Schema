@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
+import { useIsMobile, useIsTablet } from "@/lib/use-media-query";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
 import { ProjectSchemaNav } from "@/components/workspace/project-schema-nav";
 import { AppMenubar } from "@/components/workspace/app-menubar";
@@ -36,6 +37,7 @@ import {
   Database,
   FolderOpen,
   FileText,
+  Sparkles,
 } from "lucide-react";
 import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
@@ -84,7 +86,7 @@ function CanvasHeader({
   const schema = schemas.find((s) => s.id === activeSchemaId);
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b bg-card/60 px-3 py-2 backdrop-blur-sm">
+    <div className="flex shrink-0 items-center gap-2 border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
       <Button
         variant="ghost"
         size="icon"
@@ -102,9 +104,9 @@ function CanvasHeader({
       <WorkspaceSwitcher />
       <ProjectSchemaNav />
 
-      <div className="ml-auto flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <div className="ml-auto hidden min-w-0 items-center gap-1.5 text-xs text-muted-foreground md:flex">
         <Database className="size-3 shrink-0" />
-        <span className="truncate max-w-[140px]">
+        <span className="truncate max-w-[100px] lg:max-w-[140px]">
           {workspace?.name ?? "Workspace"}
         </span>
         <ChevronRight className="size-3 shrink-0" />
@@ -114,14 +116,20 @@ function CanvasHeader({
             className="flex items-center gap-1 hover:text-foreground"
           >
             <FolderOpen className="size-3 shrink-0" />
-            <span className="truncate max-w-[160px]">{project.name}</span>
+            <span className="truncate max-w-[120px] lg:max-w-[160px]">{project.name}</span>
           </Link>
         ) : (
           <span>Project</span>
         )}
         <ChevronRight className="size-3 shrink-0" />
         <FileText className="size-3 shrink-0 text-emerald-500" />
-        <span className="max-w-[200px] truncate font-medium text-foreground">
+        <span className="max-w-[140px] truncate font-medium text-foreground lg:max-w-[200px]">
+          {schema?.name ?? "Schema"}
+        </span>
+      </div>
+      <div className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
+        <FileText className="size-3 shrink-0 text-emerald-500" />
+        <span className="max-w-[140px] truncate font-medium text-foreground">
           {schema?.name ?? "Schema"}
         </span>
       </div>
@@ -134,9 +142,36 @@ export default function Home() {
   const sidebarRef = usePanelRef();
   const sqlPanelRef = usePanelRef();
   const aiPanelRef = usePanelRef();
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [sqlPanelCollapsed, setSqlPanelCollapsed] = useState(false);
   const [aiPanelOpen, setAiPanelOpen] = useState(true);
+
+  // Re-balance panels when the breakpoint flips (rotate phone, resize window).
+  // ResizablePanel locks its initial size at mount, so we call resize/expand
+  // imperatively whenever the breakpoint changes.
+  useEffect(() => {
+    const sidebar = sidebarRef.current;
+    const sql = sqlPanelRef.current;
+    if (isMobile) {
+      sidebar?.collapse();
+      sql?.collapse();
+      setAiPanelOpen(false);
+    } else if (isTablet) {
+      sidebar?.collapse();
+      sql?.expand?.();
+      sql?.resize?.(35);
+      setAiPanelOpen(false);
+    } else {
+      // Desktop — restore the default 3-pane layout.
+      sidebar?.expand?.();
+      sidebar?.resize?.(20);
+      sql?.expand?.();
+      sql?.resize?.(35);
+      setAiPanelOpen(true);
+    }
+  }, [isMobile, isTablet, sidebarRef, sqlPanelRef]);
 
   const {
     activeProjectId,
@@ -212,11 +247,11 @@ export default function Home() {
 
   return (
     <div className="flex h-full w-full flex-1 flex-col">
-      <header className="flex h-10 shrink-0 items-center gap-3 border-b bg-background/95 px-3 backdrop-blur-sm">
+      <header className="flex h-10 shrink-0 items-center gap-2 overflow-x-auto border-b bg-background/95 px-2 backdrop-blur-sm sm:gap-3 sm:px-3">
         <Link href="/" className="shrink-0">
           <BrandLogo />
         </Link>
-        <div className="h-4 w-px bg-border" />
+        <div className="hidden h-4 w-px shrink-0 bg-border sm:block" />
         <AppMenubar
           sidebarCollapsed={sidebarCollapsed}
           onToggleSidebar={toggleSidebar}
@@ -244,7 +279,23 @@ export default function Home() {
           onAddRelation={() => setAddRelationOpen(true)}
           onExportPng={() => exportCanvasPng()}
         />
-        <div className="ml-auto">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setAiPanelOpen((v) => !v)}
+            aria-pressed={aiPanelOpen}
+            title={aiPanelOpen ? "Close AI assistant" : "Open AI assistant"}
+            className={`group inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+              aiPanelOpen
+                ? "border-primary/40 bg-primary/10 text-primary"
+                : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+            }`}
+          >
+            <Sparkles
+              className={`size-3.5 ${aiPanelOpen ? "text-primary" : "text-primary/80 group-hover:text-primary"}`}
+            />
+            <span className="hidden sm:inline">AI</span>
+          </button>
           <UserMenu variant="compact" />
         </div>
       </header>
@@ -252,9 +303,9 @@ export default function Home() {
       <ResizablePanelGroup orientation="horizontal" className="flex-1">
         <ResizablePanel
           panelRef={sidebarRef}
-          defaultSize={20}
-          minSize="15%"
-          maxSize="30%"
+          defaultSize={isMobile ? 70 : isTablet ? 28 : 20}
+          minSize={isMobile ? "50%" : "15%"}
+          maxSize={isMobile ? "90%" : isTablet ? "45%" : "30%"}
           collapsible
           collapsedSize={0}
           onResize={(size) => setSidebarCollapsed(size.asPercentage === 0)}
@@ -297,9 +348,9 @@ export default function Home() {
                 <ResizableHandle withHandle />
                 <ResizablePanel
                   panelRef={aiPanelRef}
-                  defaultSize={25}
-                  minSize="20%"
-                  maxSize="40%"
+                  defaultSize={isMobile ? 80 : isTablet ? 35 : 25}
+                  minSize={isMobile ? "60%" : "20%"}
+                  maxSize={isMobile ? "95%" : isTablet ? "55%" : "40%"}
                 >
                   <AiChat onClose={() => setAiPanelOpen(false)} />
                 </ResizablePanel>

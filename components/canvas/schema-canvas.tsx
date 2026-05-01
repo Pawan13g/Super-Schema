@@ -1,12 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useTheme } from "next-themes";
 import {
   ReactFlow,
   Background,
   BackgroundVariant,
   Controls,
+  ControlButton,
   MiniMap,
   applyNodeChanges,
   type Node,
@@ -20,6 +22,7 @@ import {
 import "@xyflow/react/dist/style.css";
 
 import { useSchema } from "@/lib/schema-store";
+import { useIsMobile } from "@/lib/use-media-query";
 import { TableNode } from "./table-node";
 import {
   ContextMenu,
@@ -37,6 +40,9 @@ import {
   Link2,
   ArrowRightLeft,
   Eye,
+  LayoutGrid,
+  Undo2,
+  Redo2,
 } from "lucide-react";
 import type { Relation } from "@/lib/types";
 
@@ -59,6 +65,7 @@ export function SchemaCanvas() {
     selectedTableId,
     setSelectedTableId,
     updateTablePosition,
+    setTablePositions,
     updateTableName,
     updateColumn,
     addRelation,
@@ -67,9 +74,14 @@ export function SchemaCanvas() {
     removeTable,
     removeRelation,
     createJunctionTable,
+    undo,
+    redo,
+    canUndo,
+    canRedo,
   } = useSchema();
 
   const { resolvedTheme } = useTheme();
+  const isMobile = useIsMobile();
   // Avoid hydration mismatch: only compute theme-aware mode after client mount.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -78,6 +90,10 @@ export function SchemaCanvas() {
   const [nodes, setNodes] = useState<Node[]>([]);
   const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
+  // Defer schema → RF sync while a drag is in flight so we don't recreate
+  // node objects mid-drag and lose the drag delta.
+  const draggingRef = useRef(false);
+  const pendingSyncRef = useRef(false);
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [relationDialogOpen, setRelationDialogOpen] = useState(false);
@@ -95,28 +111,144 @@ export function SchemaCanvas() {
     setConfirm({ kind: "delete-table", tableId: id });
   }, []);
 
+  // Auto-arrange tables into layered columns by FK direction.
+  // Roots (no incoming relation) on the left; orphans tucked into a final column.
+  const autoArrange = useCallback(() => {
+    const tables = schema.tables;
+    if (tables.length === 0) return;
+
+    const idSet = new Set(tables.map((t) => t.id));
+    const incoming = new Map<string, Set<string>>();
+    const outgoing = new Map<string, Set<string>>();
+    tables.forEach((t) => {
+      incoming.set(t.id, new Set());
+      outgoing.set(t.id, new Set());
+    });
+    schema.relations.forEach((r) => {
+      if (!idSet.has(r.sourceTable) || !idSet.has(r.targetTable)) return;
+      if (r.sourceTable === r.targetTable) return;
+      outgoing.get(r.sourceTable)!.add(r.targetTable);
+      incoming.get(r.targetTable)!.add(r.sourceTable);
+    });
+
+    const depth = new Map<string, number>();
+    const queue: string[] = [];
+    tables.forEach((t) => {
+      if ((incoming.get(t.id)?.size ?? 0) === 0) {
+        depth.set(t.id, 0);
+        queue.push(t.id);
+      }
+    });
+    // BFS; cycle-safe via visited check
+    while (queue.length) {
+      const id = queue.shift()!;
+      const d = depth.get(id) ?? 0;
+      outgoing.get(id)?.forEach((next) => {
+        const nd = depth.get(next);
+        if (nd === undefined || nd < d + 1) {
+          depth.set(next, d + 1);
+          queue.push(next);
+        }
+      });
+    }
+    // Tables in a cycle without a clear root — drop into the last column
+    let maxDepth = 0;
+    depth.forEach((d) => {
+      if (d > maxDepth) maxDepth = d;
+    });
+    const orphanCol = maxDepth + 1;
+    tables.forEach((t) => {
+      if (!depth.has(t.id)) depth.set(t.id, orphanCol);
+    });
+
+    const columns = new Map<number, string[]>();
+    tables.forEach((t) => {
+      const c = depth.get(t.id) ?? 0;
+      if (!columns.has(c)) columns.set(c, []);
+      columns.get(c)!.push(t.id);
+    });
+
+    const X_GAP = 80;
+    const Y_GAP = 60;
+    const X_START = 80;
+    const Y_START = 80;
+    const FALLBACK_W = 240;
+    const FALLBACK_H = (cols: number) => 60 + cols * 32;
+
+    // Use React Flow's measured dimensions when available — falls back to
+    // an estimate before nodes have rendered for the first time.
+    const measureFor = (id: string, columnCount: number) => {
+      const node = reactFlowInstanceRef.current?.getNode(id);
+      const w = node?.measured?.width ?? FALLBACK_W;
+      const h = node?.measured?.height ?? FALLBACK_H(columnCount);
+      return { w, h };
+    };
+
+    // Per-column max width — keeps columns vertically aligned.
+    const columnWidths = new Map<number, number>();
+    columns.forEach((ids, col) => {
+      let maxW = FALLBACK_W;
+      ids.forEach((tid) => {
+        const t = tables.find((x) => x.id === tid)!;
+        const { w } = measureFor(tid, t.columns.length);
+        if (w > maxW) maxW = w;
+      });
+      columnWidths.set(col, maxW);
+    });
+
+    const positions: Record<string, { x: number; y: number }> = {};
+    let xCursor = X_START;
+    const sortedColIndexes = Array.from(columns.keys()).sort((a, b) => a - b);
+    for (const col of sortedColIndexes) {
+      const ids = columns.get(col)!;
+      const colW = columnWidths.get(col) ?? FALLBACK_W;
+      let yCursor = Y_START;
+      for (const tid of ids) {
+        const t = tables.find((x) => x.id === tid)!;
+        const { h } = measureFor(tid, t.columns.length);
+        positions[tid] = { x: xCursor, y: yCursor };
+        yCursor += h + Y_GAP;
+      }
+      xCursor += colW + X_GAP;
+    }
+
+    setTablePositions(positions);
+
+    requestAnimationFrame(() => {
+      reactFlowInstanceRef.current?.fitView({ padding: 0.15, duration: 400 });
+    });
+    toast.success(
+      `Arranged ${tables.length} table${tables.length === 1 ? "" : "s"}`
+    );
+  }, [schema.tables, schema.relations, setTablePositions]);
+
   // Sync schema → React Flow nodes. RF owns measured dimensions / drag
-  // positions; schema owns identity + persisted position.
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setNodes((prev) =>
-      schema.tables.map((table) => {
-        const existing = prev.find((n) => n.id === table.id);
+  // positions; schema owns identity + persisted position. Skip sync while a
+  // drag is in flight; flush on drag-stop.
+  const syncNodesFromSchema = useCallback(() => {
+    setNodes((prev) => {
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return schema.tables.map((table) => {
+        const existing = prevById.get(table.id);
+        const data = {
+          table,
+          selected: table.id === selectedTableId,
+          onSelect: setSelectedTableId,
+          onRequestDelete: requestDeleteTable,
+          onRename: updateTableName,
+        };
+        if (existing) {
+          // Preserve RF-owned fields: position, measured, dragging, etc.
+          return { ...existing, data };
+        }
         return {
-          ...(existing ?? {}),
           id: table.id,
           type: "tableNode",
-          position: existing ? existing.position : table.position,
-          data: {
-            table,
-            selected: table.id === selectedTableId,
-            onSelect: setSelectedTableId,
-            onRequestDelete: requestDeleteTable,
-            onRename: updateTableName,
-          },
+          position: table.position,
+          data,
         };
-      })
-    );
+      });
+    });
   }, [
     schema.tables,
     selectedTableId,
@@ -124,6 +256,41 @@ export function SchemaCanvas() {
     requestDeleteTable,
     updateTableName,
   ]);
+
+  useEffect(() => {
+    if (draggingRef.current) {
+      pendingSyncRef.current = true;
+      return;
+    }
+    syncNodesFromSchema();
+  }, [syncNodesFromSchema]);
+
+  // Undo/redo keyboard shortcuts (Ctrl/Cmd+Z, Ctrl/Cmd+Shift+Z, Ctrl+Y).
+  // Ignored while focus is in an editable element so we don't hijack the
+  // browser's native input undo.
+  useEffect(() => {
+    const isEditable = (el: EventTarget | null) => {
+      if (!(el instanceof HTMLElement)) return false;
+      if (el.isContentEditable) return true;
+      const tag = el.tagName;
+      return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+    };
+    const handler = (e: KeyboardEvent) => {
+      if (isEditable(e.target)) return;
+      const mod = e.ctrlKey || e.metaKey;
+      if (!mod) return;
+      const k = e.key.toLowerCase();
+      if (k === "z" && !e.shiftKey) {
+        e.preventDefault();
+        undo();
+      } else if ((k === "z" && e.shiftKey) || k === "y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [undo, redo]);
 
   const edges: Edge[] = schema.relations.map((rel) => {
     const sourceTable = schema.tables.find((t) => t.id === rel.sourceTable);
@@ -142,12 +309,20 @@ export function SchemaCanvas() {
           : rel.type === "one-to-one"
             ? "1:1"
             : "N:M",
-      labelStyle: { fontSize: 10, fontWeight: 600 },
-      labelBgStyle: { fill: "var(--color-card)" },
-      labelBgPadding: [4, 2] as [number, number],
-      labelBgBorderRadius: 4,
+      labelStyle: {
+        fontSize: 10,
+        fontWeight: 700,
+        fill: "var(--color-foreground)",
+      },
+      labelBgStyle: {
+        fill: "var(--color-background)",
+        stroke: "var(--color-border)",
+        strokeWidth: 1,
+      },
+      labelBgPadding: [6, 3] as [number, number],
+      labelBgBorderRadius: 6,
       markerEnd: { type: MarkerType.ArrowClosed, color: sourceColor },
-      style: { stroke: sourceColor, strokeWidth: 1.5 },
+      style: { stroke: sourceColor, strokeWidth: 1.75 },
     };
   });
 
@@ -155,11 +330,22 @@ export function SchemaCanvas() {
     setNodes((nds) => applyNodeChanges(changes, nds));
   }, []);
 
+  const onNodeDragStart: OnNodeDrag = useCallback(() => {
+    draggingRef.current = true;
+  }, []);
+
   const onNodeDragStop: OnNodeDrag = useCallback(
     (_event, node) => {
       updateTablePosition(node.id, node.position);
+      draggingRef.current = false;
+      // Flush any deferred schema sync that arrived during the drag.
+      if (pendingSyncRef.current) {
+        pendingSyncRef.current = false;
+        // Defer one tick so React commits position update first.
+        queueMicrotask(() => syncNodesFromSchema());
+      }
     },
-    [updateTablePosition]
+    [updateTablePosition, syncNodesFromSchema]
   );
 
   const onConnect = useCallback(
@@ -466,6 +652,7 @@ export function SchemaCanvas() {
           reactFlowInstanceRef.current = instance;
         }}
         onNodesChange={onNodesChange}
+        onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
@@ -493,21 +680,48 @@ export function SchemaCanvas() {
           size={1}
           className="!opacity-60"
         />
-        <Controls className="!rounded-lg !border !border-border !bg-card !shadow-sm" />
-        <MiniMap
-        pannable zoomable 
-        nodeBorderRadius={10}
-          nodeStrokeWidth={3}
-          nodeClassName={(n) =>
-            n.selected ? "!border-primary" : "!border-border"
-          }
-          nodeColor={(n) => {
-            const table = schema.tables.find((t) => t.id === n.id);
-            return table?.color ?? "var(--color-muted-foreground)";
-          }}
-          
-          className="!bg-card !border !border-border !rounded-lg !shadow-sm"
-        />
+        <Controls className="!rounded-lg !border !border-border !bg-card !shadow-sm">
+          <ControlButton
+            onClick={undo}
+            title="Undo (Ctrl+Z)"
+            aria-label="Undo"
+            disabled={!canUndo}
+          >
+            <Undo2 />
+          </ControlButton>
+          <ControlButton
+            onClick={redo}
+            title="Redo (Ctrl+Shift+Z)"
+            aria-label="Redo"
+            disabled={!canRedo}
+          >
+            <Redo2 />
+          </ControlButton>
+          <ControlButton
+            onClick={autoArrange}
+            title="Auto-arrange tables"
+            aria-label="Auto-arrange tables"
+            disabled={schema.tables.length === 0}
+          >
+            <LayoutGrid />
+          </ControlButton>
+        </Controls>
+        {!isMobile && (
+          <MiniMap
+            pannable
+            zoomable
+            nodeBorderRadius={10}
+            nodeStrokeWidth={3}
+            nodeClassName={(n) =>
+              n.selected ? "!border-primary" : "!border-border"
+            }
+            nodeColor={(n) => {
+              const table = schema.tables.find((t) => t.id === n.id);
+              return table?.color ?? "var(--color-muted-foreground)";
+            }}
+            className="!bg-card !border !border-border !rounded-lg !shadow-sm"
+          />
+        )}
       </ReactFlow>
 
       {/* Floating toolbar — top right */}

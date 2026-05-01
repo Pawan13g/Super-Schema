@@ -2,14 +2,32 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import bcrypt from "bcryptjs";
 import { prisma } from "@/lib/db";
+import {
+  checkRateLimit,
+  clientKey,
+  rateLimitResponse,
+} from "@/lib/rate-limit";
+
+// 5 sign-ups / hour / IP — kills bot floods without harming legitimate
+// signups. Honeypot field below catches naive scripted submitters earlier.
+const RATE_OPTS = { windowMs: 60 * 60_000, max: 5 };
 
 const bodySchema = z.object({
   name: z.string().min(1).max(100),
   email: z.email(),
   password: z.string().min(8).max(128),
+  // Honeypot — real browsers leave this empty. Bots fill every field.
+  hp_company: z.string().max(0).optional().or(z.literal("")),
 });
 
 export async function POST(request: NextRequest) {
+  const limit = checkRateLimit(clientKey(request, "signup"), RATE_OPTS);
+  if (!limit.ok)
+    return rateLimitResponse(
+      limit,
+      "Too many sign-ups from this address. Try again later."
+    );
+
   try {
     const body = await request.json();
     const parsed = bodySchema.safeParse(body);
@@ -19,7 +37,12 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const { name, email, password } = parsed.data;
+    if (parsed.data.hp_company) {
+      // Honeypot tripped — pretend success to avoid signaling the bot.
+      return Response.json({ user: null }, { status: 200 });
+    }
+    const { name, password } = parsed.data;
+    const email = parsed.data.email.trim().toLowerCase();
 
     const existing = await prisma.user.findUnique({ where: { email } });
     if (existing) {

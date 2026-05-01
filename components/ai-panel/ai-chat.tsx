@@ -1,33 +1,102 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { toast } from "sonner";
 import { useSchema } from "@/lib/schema-store";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader } from "@/components/ui/loader";
 import {
-  Sparkles,
-  Send,
-  Loader2,
+  ArrowUp,
+  Check,
+  Clock,
+  Copy,
   Lightbulb,
+  Pencil,
+  Plus,
+  RefreshCw,
+  Settings,
+  Sparkles,
+  Undo2,
   Wrench,
   X,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
+
+type MessageRole = "user" | "assistant" | "error" | "system";
 
 interface Message {
-  role: "user" | "assistant" | "error";
+  id: string;
+  role: MessageRole;
   content: string;
+  // Tag tells us what action produced this user prompt so re-runs match.
+  action?: "generate" | "explain" | "fix";
+  meta?: {
+    latencyMs?: number;
+    provider?: string | null;
+    model?: string | null;
+  };
 }
 
-async function callAi(action: string, payload: Record<string, string>) {
+function formatMs(ms: number) {
+  if (ms < 1000) return `${ms} ms`;
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+function uid() {
+  // typeof crypto guard for SSR; cast through unknown so the conditional
+  // narrowing inside the function doesn't reduce the binding to `never`
+  // after the first branch.
+  const c =
+    typeof crypto !== "undefined"
+      ? (crypto as Crypto & { randomUUID?: () => string })
+      : null;
+  if (c?.randomUUID) return c.randomUUID();
+  // Fallback that still uses cryptographic entropy when available — keeps
+  // collisions astronomically unlikely even when the user spams.
+  if (c?.getRandomValues) {
+    const buf = new Uint8Array(16);
+    c.getRandomValues(buf);
+    return Array.from(buf, (b) => b.toString(16).padStart(2, "0")).join("");
+  }
+  // Last-resort: timestamp + random — collision risk only if Math.random is
+  // seeded identically across two simultaneous tabs. Rare.
+  return `${Date.now().toString(36)}-${Math.floor(Math.random() * 1e12).toString(36)}`;
+}
+
+interface AiCallResult<T> {
+  result: T;
+  meta?: {
+    latencyMs?: number;
+    provider?: string | null;
+    model?: string | null;
+  };
+}
+
+async function callAi<T = unknown>(
+  action: string,
+  payload: Record<string, string>
+): Promise<AiCallResult<T>> {
   const res = await fetch("/api/ai", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action, payload }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "AI request failed");
-  return data.result;
+  if (!res.ok) {
+    if (data.code === "NO_KEY") {
+      toast.error(data.error, {
+        action: {
+          label: "Open settings",
+          onClick: () => (location.href = "/settings"),
+        },
+      });
+    } else {
+      toast.error(data.error ?? "AI request failed");
+    }
+    throw new Error(data.error ?? "AI request failed");
+  }
+  return { result: data.result as T, meta: data.meta };
 }
 
 export function AiChat({ onClose }: { onClose: () => void }) {
@@ -35,234 +104,546 @@ export function AiChat({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState("");
+  const [aiReady, setAiReady] = useState<boolean | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // Snapshots of the message list captured before destructive operations
+  // (edit + re-run, regenerate, new chat). Lets the user undo a truncation
+  // and recover the branch they overwrote.
+  const branchStackRef = useRef<Message[][]>([]);
+  const [, bumpUndo] = useReducer((c: number) => c + 1, 0);
+  const canUndoChat = branchStackRef.current.length > 0;
 
-  const schemaJson = JSON.stringify(
-    {
-      tables: schema.tables.map((t) => ({
-        name: t.name,
-        columns: t.columns.map((c) => ({
-          name: c.name,
-          type: c.type,
-          constraints: c.constraints,
-        })),
-      })),
-      relations: schema.relations.map((r) => {
-        const srcTable = schema.tables.find((t) => t.id === r.sourceTable);
-        const tgtTable = schema.tables.find((t) => t.id === r.targetTable);
-        const srcCol = srcTable?.columns.find((c) => c.id === r.sourceColumn);
-        const tgtCol = tgtTable?.columns.find((c) => c.id === r.targetColumn);
-        return {
-          sourceTable: srcTable?.name,
-          sourceColumn: srcCol?.name,
-          targetTable: tgtTable?.name,
-          targetColumn: tgtCol?.name,
-          type: r.type,
-        };
-      }),
-    },
-    null,
-    2
+  const pushBranch = (snapshot: Message[]) => {
+    branchStackRef.current.push(snapshot);
+    if (branchStackRef.current.length > 20) branchStackRef.current.shift();
+    bumpUndo();
+  };
+
+  const undoChat = () => {
+    const last = branchStackRef.current.pop();
+    if (!last) return;
+    setMessages(last);
+    bumpUndo();
+  };
+
+  useEffect(() => {
+    fetch("/api/settings")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((s) => {
+        if (!s) return;
+        setAiReady(!!(s.aiEnabled && s.aiProvider && s.hasApiKey));
+      })
+      .catch(() => setAiReady(null));
+  }, []);
+
+  useEffect(() => {
+    // Scroll to bottom when messages change
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, loading]);
+
+  const schemaJson = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          tables: schema.tables.map((t) => ({
+            name: t.name,
+            columns: t.columns.map((c) => ({
+              name: c.name,
+              type: c.type,
+              constraints: c.constraints,
+            })),
+          })),
+          relations: schema.relations.map((r) => {
+            const srcTable = schema.tables.find((t) => t.id === r.sourceTable);
+            const tgtTable = schema.tables.find((t) => t.id === r.targetTable);
+            const srcCol = srcTable?.columns.find((c) => c.id === r.sourceColumn);
+            const tgtCol = tgtTable?.columns.find((c) => c.id === r.targetColumn);
+            return {
+              sourceTable: srcTable?.name,
+              sourceColumn: srcCol?.name,
+              targetTable: tgtTable?.name,
+              targetColumn: tgtCol?.name,
+              type: r.type,
+            };
+          }),
+        },
+        null,
+        2
+      ),
+    [schema]
   );
 
-  const handleGenerate = async () => {
-    if (!input.trim()) return;
-    const prompt = input.trim();
+  // -- Core: run a user action against AI -----------------------------------
+
+  const runAction = async (
+    action: "generate" | "explain" | "fix",
+    promptText: string,
+    options: { replaceAt?: string } = {}
+  ) => {
+    let nextMessages: Message[];
+    const userMsg: Message = {
+      id: options.replaceAt ?? uid(),
+      role: "user",
+      content: promptText,
+      action,
+    };
+
+    if (options.replaceAt) {
+      const idx = messages.findIndex((m) => m.id === options.replaceAt);
+      if (idx === -1) {
+        nextMessages = [...messages, userMsg];
+      } else {
+        // Drop the user msg + everything after (AI replies, errors).
+        // Capture the pre-truncation array so the user can undo.
+        if (messages.length > 0) pushBranch(messages);
+        nextMessages = [...messages.slice(0, idx), userMsg];
+      }
+    } else {
+      nextMessages = [...messages, userMsg];
+    }
+
+    setMessages(nextMessages);
+    setLoading(true);
+
+    const appendError = (msg: string) =>
+      setMessages((prev) => [
+        ...prev,
+        { id: uid(), role: "error", content: msg },
+      ]);
+
+    try {
+      if (action === "generate") {
+        const { result, meta } = await callAi<{
+          tables: { name: string }[];
+          relations?: unknown[];
+        }>("generate_schema", { description: promptText });
+        importAiSchema(result as never);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: "assistant",
+            content: `Generated schema with ${result.tables.length} table${result.tables.length === 1 ? "" : "s"} and ${result.relations?.length ?? 0} relation${(result.relations?.length ?? 0) === 1 ? "" : "s"}. Canvas updated.`,
+            meta,
+          },
+        ]);
+      } else if (action === "explain") {
+        const { result, meta } = await callAi<string>("explain_schema", {
+          schema: schemaJson,
+        });
+        setMessages((prev) => [
+          ...prev,
+          { id: uid(), role: "assistant", content: result, meta },
+        ]);
+      } else if (action === "fix") {
+        const { result, meta } = await callAi<{
+          tables: { name: string }[];
+          relations?: unknown[];
+        }>("fix_schema", { schema: schemaJson });
+        importAiSchema(result as never);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: uid(),
+            role: "assistant",
+            content: `Schema improved — now ${result.tables.length} table${result.tables.length === 1 ? "" : "s"} and ${result.relations?.length ?? 0} relation${(result.relations?.length ?? 0) === 1 ? "" : "s"}. Canvas updated.`,
+            meta,
+          },
+        ]);
+      }
+    } catch (err) {
+      appendError(
+        err instanceof Error ? err.message : "Request failed"
+      );
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // -- UI handlers ----------------------------------------------------------
+
+  const submitPrompt = () => {
+    const text = input.trim();
+    if (!text || loading) return;
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: prompt }]);
-    setLoading(true);
+    runAction("generate", text);
+  };
 
+  const beginEdit = (msg: Message) => {
+    setEditingId(msg.id);
+    setEditDraft(msg.content);
+  };
+
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditDraft("");
+  };
+
+  const saveEdit = (msg: Message) => {
+    const next = editDraft.trim();
+    if (!next) return;
+    setEditingId(null);
+    setEditDraft("");
+    runAction(msg.action ?? "generate", next, { replaceAt: msg.id });
+  };
+
+  const regenerate = (assistantMsg: Message) => {
+    // Walk backward from THIS assistant message (resolved by id, not stale
+    // index) to the most recent user prompt and re-run it. Captures the
+    // current message tree as an undoable branch.
+    const idx = messages.findIndex((m) => m.id === assistantMsg.id);
+    if (idx === -1) {
+      toast.error("Message no longer in history");
+      return;
+    }
+    for (let i = idx - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role === "user") {
+        runAction(m.action ?? "generate", m.content, { replaceAt: m.id });
+        return;
+      }
+    }
+    toast.error("No prompt found to regenerate from");
+  };
+
+  const copyToClipboard = async (text: string) => {
     try {
-      const result = await callAi("generate_schema", {
-        description: prompt,
-      });
-      importAiSchema(result);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Generated schema with ${result.tables.length} tables and ${result.relations?.length ?? 0} relations. The canvas has been updated.`,
-        },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "error",
-          content: err instanceof Error ? err.message : "Failed to generate schema",
-        },
-      ]);
-    } finally {
-      setLoading(false);
+      await navigator.clipboard.writeText(text);
+      toast.success("Copied");
+    } catch {
+      toast.error("Copy failed");
     }
   };
 
-  const handleExplain = async () => {
-    if (schema.tables.length === 0) return;
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: "Explain my current schema" },
-    ]);
-    setLoading(true);
-
-    try {
-      const result = await callAi("explain_schema", { schema: schemaJson });
-      setMessages((prev) => [...prev, { role: "assistant", content: result }]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "error",
-          content: err instanceof Error ? err.message : "Failed to explain schema",
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
+  const newChat = () => {
+    if (loading) return;
+    if (messages.length > 0) pushBranch(messages);
+    setMessages([]);
+    setInput("");
+    setEditingId(null);
   };
 
-  const handleFix = async () => {
-    if (schema.tables.length === 0) return;
-    setMessages((prev) => [
-      ...prev,
-      { role: "user", content: "Fix and improve my schema" },
-    ]);
-    setLoading(true);
-
-    try {
-      const result = await callAi("fix_schema", { schema: schemaJson });
-      importAiSchema(result);
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Schema improved! Now has ${result.tables.length} tables and ${result.relations?.length ?? 0} relations. The canvas has been updated.`,
-        },
-      ]);
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "error",
-          content: err instanceof Error ? err.message : "Failed to fix schema",
-        },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  const hasTables = schema.tables.length > 0;
 
   return (
-    <div className="flex h-full flex-col bg-card">
+    <div className="flex h-full flex-col bg-background">
       {/* Header */}
-      <div className="flex items-center justify-between border-b px-3 py-2">
-        <div className="flex items-center gap-2">
-          <Sparkles className="size-4 text-indigo-500" />
-          <span className="text-xs font-semibold">AI Assistant</span>
-        </div>
-        <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+        <Sparkles className="size-4 text-primary" />
+        <span className="text-sm font-semibold">AI</span>
+        <div className="ml-auto flex items-center gap-0.5">
           <Button
             variant="ghost"
-            size="xs"
-            onClick={handleExplain}
-            disabled={loading || schema.tables.length === 0}
-            title="Explain current schema"
+            size="icon-xs"
+            onClick={undoChat}
+            disabled={!canUndoChat || loading}
+            title="Undo last edit / regenerate / new chat"
+            aria-label="Undo chat change"
           >
-            <Lightbulb className="size-3" />
-            <span className="text-[10px]">Explain</span>
+            <Undo2 className="size-3.5" />
           </Button>
           <Button
             variant="ghost"
-            size="xs"
-            onClick={handleFix}
-            disabled={loading || schema.tables.length === 0}
-            title="Fix and improve schema"
+            size="icon-xs"
+            onClick={newChat}
+            disabled={loading || messages.length === 0}
+            title="New chat"
+            aria-label="New chat"
           >
-            <Wrench className="size-3" />
-            <span className="text-[10px]">Fix</span>
+            <Plus className="size-3.5" />
           </Button>
-          <Button variant="ghost" size="icon-xs" onClick={onClose}>
-            <X className="size-3" />
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={onClose}
+            title="Close"
+            aria-label="Close"
+          >
+            <X className="size-3.5" />
           </Button>
         </div>
       </div>
 
       {/* Messages */}
-      <ScrollArea className="flex-1">
-        <div className="space-y-3 p-3">
-          {messages.length === 0 && (
-            <div className="py-6 text-center">
-              <Sparkles className="mx-auto size-8 text-muted-foreground/30" />
-              <p className="mt-2 text-xs text-muted-foreground">
-                Describe your application to generate a database schema, or use
-                the buttons above to explain or fix your current schema.
+      <div ref={scrollRef} className="flex-1 overflow-y-auto">
+        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-5">
+          {aiReady === false && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3">
+              <p className="text-xs font-medium text-foreground">AI not configured</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                Choose a provider and enter your API key to start chatting.
               </p>
-              <div className="mt-3 flex flex-wrap justify-center gap-1.5">
-                {[
-                  "E-commerce platform with users, products, and orders",
-                  "Blog with posts, comments, tags, and authors",
-                  "Project management tool with tasks and teams",
-                ].map((suggestion) => (
-                  <button
-                    key={suggestion}
-                    onClick={() => setInput(suggestion)}
-                    className="rounded-full border bg-muted/50 px-2.5 py-1 text-[10px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  >
-                    {suggestion}
-                  </button>
-                ))}
-              </div>
+              <a
+                href="/settings"
+                className="mt-2 inline-flex items-center gap-1 rounded-md bg-foreground px-2 py-1 text-[11px] font-medium text-background hover:opacity-90"
+              >
+                <Settings className="size-3" />
+                Open settings
+              </a>
             </div>
           )}
 
-          {messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`rounded-lg px-3 py-2 text-xs leading-relaxed ${
-                msg.role === "user"
-                  ? "ml-8 bg-indigo-500/10 text-foreground"
-                  : msg.role === "error"
-                    ? "mr-8 border border-destructive/20 bg-destructive/5 text-destructive"
-                    : "mr-8 bg-muted text-foreground"
-              }`}
-            >
-              <div className="whitespace-pre-wrap">{msg.content}</div>
-            </div>
-          ))}
+          {messages.length === 0 && (
+            <EmptyState
+              hasTables={hasTables}
+              onPick={(s) => setInput(s)}
+              onExplain={() => runAction("explain", "Explain my current schema")}
+              onFix={() => runAction("fix", "Fix and improve my schema")}
+            />
+          )}
+
+          {messages.map((msg, idx) => {
+            if (msg.role === "user") {
+              const isEditing = editingId === msg.id;
+              return (
+                <div key={msg.id} className="group/msg flex justify-end">
+                  <div className="flex w-full max-w-[80%] flex-col items-end gap-1">
+                    {isEditing ? (
+                      <div className="w-full rounded-2xl bg-muted px-3.5 py-2.5">
+                        <textarea
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          rows={Math.min(8, Math.max(2, editDraft.split("\n").length))}
+                          autoFocus
+                          className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none"
+                        />
+                        <div className="mt-2 flex justify-end gap-1.5">
+                          <Button variant="ghost" size="xs" onClick={cancelEdit}>
+                            Cancel
+                          </Button>
+                          <Button
+                            size="xs"
+                            onClick={() => saveEdit(msg)}
+                            disabled={!editDraft.trim() || loading}
+                          >
+                            Save & re-run
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="rounded-2xl bg-muted px-3.5 py-2 text-sm leading-relaxed">
+                          <span className="whitespace-pre-wrap">{msg.content}</span>
+                        </div>
+                        <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
+                          <IconBtn
+                            label="Edit"
+                            onClick={() => beginEdit(msg)}
+                            disabled={loading}
+                          >
+                            <Pencil className="size-3" />
+                          </IconBtn>
+                          <IconBtn
+                            label="Copy"
+                            onClick={() => copyToClipboard(msg.content)}
+                          >
+                            <Copy className="size-3" />
+                          </IconBtn>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            }
+
+            if (msg.role === "error") {
+              return (
+                <div key={msg.id} className="flex gap-2">
+                  <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+                    <X className="size-3.5" />
+                  </div>
+                  <div className="flex-1 rounded-2xl border border-destructive/20 bg-destructive/5 px-3.5 py-2 text-sm text-destructive">
+                    {msg.content}
+                  </div>
+                </div>
+              );
+            }
+
+            // assistant
+            return (
+              <div key={msg.id} className="group/msg flex gap-2.5">
+                <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                  <Sparkles className="size-3.5 text-primary" />
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                  <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm leading-relaxed text-foreground dark:prose-invert">
+                    {msg.content}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                    {msg.meta?.latencyMs !== undefined && (
+                      <span
+                        title={`${msg.meta.provider ?? ""}${msg.meta.model ? ` · ${msg.meta.model}` : ""}`}
+                        className="inline-flex items-center gap-1 rounded-full bg-muted px-1.5 py-0.5 font-medium"
+                      >
+                        <Clock className="size-2.5" />
+                        {formatMs(msg.meta.latencyMs)}
+                      </span>
+                    )}
+                    <div className="flex gap-0.5 opacity-0 transition-opacity group-hover/msg:opacity-100">
+                      <IconBtn
+                        label="Copy"
+                        onClick={() => copyToClipboard(msg.content)}
+                      >
+                        <Copy className="size-3" />
+                      </IconBtn>
+                      <IconBtn
+                        label="Regenerate"
+                        onClick={() => regenerate(msg)}
+                        disabled={loading}
+                      >
+                        <RefreshCw className="size-3" />
+                      </IconBtn>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
 
           {loading && (
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <Loader2 className="size-3 animate-spin" />
-              Thinking...
+            <div className="flex items-center gap-2.5">
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15">
+                <Sparkles className="size-3.5 text-primary" />
+              </div>
+              <Loader size="sm" label="Thinking…" />
             </div>
           )}
         </div>
-      </ScrollArea>
+      </div>
 
       {/* Input */}
-      <div className="border-t p-2">
-        <div className="flex gap-1.5">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && !loading && handleGenerate()}
-            placeholder="Describe your database..."
-            className="h-8 text-xs"
-            disabled={loading}
-          />
-          <Button
-            size="sm"
-            onClick={handleGenerate}
-            disabled={loading || !input.trim()}
-            className="h-8 shrink-0"
-          >
-            {loading ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : (
-              <Send className="size-3.5" />
-            )}
-          </Button>
+      <div className="shrink-0 border-t bg-background/80 px-3 pb-3 pt-2 backdrop-blur">
+        <div className="mx-auto max-w-3xl">
+          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm focus-within:border-foreground/30">
+            <textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submitPrompt();
+                }
+              }}
+              placeholder="Describe a database, ask a question, or paste a description…"
+              rows={Math.min(6, Math.max(1, input.split("\n").length))}
+              disabled={loading}
+              className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"
+            />
+            <button
+              type="button"
+              onClick={submitPrompt}
+              disabled={loading || !input.trim()}
+              aria-label="Send"
+              className={cn(
+                "flex size-8 shrink-0 items-center justify-center rounded-full transition-all",
+                loading || !input.trim()
+                  ? "bg-muted text-muted-foreground"
+                  : "bg-foreground text-background hover:opacity-90"
+              )}
+            >
+              {loading ? (
+                <Loader size="xs" />
+              ) : (
+                <ArrowUp className="size-4" />
+              )}
+            </button>
+          </div>
+          <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+            AI can make mistakes. Verify generated schemas before using them.
+          </p>
         </div>
       </div>
     </div>
   );
+}
+
+function IconBtn({
+  label,
+  onClick,
+  disabled,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={label}
+      aria-label={label}
+      className="flex size-6 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-40"
+    >
+      {children}
+    </button>
+  );
+}
+
+function EmptyState({
+  hasTables,
+  onPick,
+  onExplain,
+  onFix,
+}: {
+  hasTables: boolean;
+  onPick: (s: string) => void;
+  onExplain: () => void;
+  onFix: () => void;
+}) {
+  return (
+    <div className="flex flex-col items-center gap-4 py-8 text-center">
+      <div className="flex size-12 items-center justify-center rounded-2xl bg-primary/10">
+        <Sparkles className="size-5 text-primary" />
+      </div>
+      <div>
+        <p className="text-base font-semibold">How can I help?</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Describe an app and I&apos;ll design the schema.
+        </p>
+      </div>
+
+      <div className="grid w-full max-w-md grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {[
+          "E-commerce platform with users, products, and orders",
+          "Blog with posts, comments, tags, and authors",
+          "Project management tool with tasks and teams",
+          "Social network with users, posts, likes, and follows",
+        ].map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onPick(s)}
+            className="rounded-xl border bg-card px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:border-foreground/20 hover:text-foreground"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+
+      {hasTables && (
+        <div className="flex gap-1.5">
+          <Button variant="outline" size="sm" onClick={onExplain}>
+            <Lightbulb className="size-3.5" />
+            Explain my schema
+          </Button>
+          <Button variant="outline" size="sm" onClick={onFix}>
+            <Wrench className="size-3.5" />
+            Fix my schema
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Indicates when an AI message has been "applied" to the canvas (future hook).
+export function CheckIndicator() {
+  return <Check className="size-3 text-emerald-500" />;
 }

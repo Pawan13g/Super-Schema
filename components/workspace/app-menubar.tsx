@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useTheme } from "next-themes";
-import { signOut } from "next-auth/react";
 import {
   Menubar,
   MenubarMenu,
   MenubarTrigger,
   MenubarContent,
   MenubarItem,
+  MenubarGroup,
   MenubarLabel,
   MenubarSeparator,
   MenubarShortcut,
@@ -28,17 +28,18 @@ import {
   Image as ImageIcon,
   LayoutDashboard,
   Link2,
-  LogOut,
   Monitor,
   Moon,
   PanelBottom,
   PanelLeft,
   PanelRight,
   Plus,
+  Settings,
   Sparkles,
   Sun,
   Table2,
   Trash2,
+  BookOpen,
 } from "lucide-react";
 
 interface AppMenubarProps {
@@ -139,18 +140,14 @@ export function AppMenubar({
             <LayoutDashboard />
             Projects dashboard
           </MenubarItem>
+          <MenubarItem render={<Link href="/settings" />}>
+            <Settings />
+            Settings
+          </MenubarItem>
           <MenubarSeparator />
           <MenubarItem onClick={onExportPng}>
             <ImageIcon />
             Export canvas as PNG
-          </MenubarItem>
-          <MenubarSeparator />
-          <MenubarItem
-            destructive
-            onClick={() => signOut({ callbackUrl: "/sign-in" })}
-          >
-            <LogOut />
-            Sign out
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
@@ -244,18 +241,20 @@ export function AppMenubar({
         <MenubarContent>
           {activeSchema ? (
             <>
-              <MenubarLabel>{activeSchema.name}</MenubarLabel>
-              <MenubarItem onClick={onRenameSchema}>
-                Rename schema…
-              </MenubarItem>
-              <MenubarItem onClick={handleDuplicateSchema}>
-                <Copy />
-                Duplicate schema
-              </MenubarItem>
-              <MenubarItem destructive onClick={handleDeleteSchema}>
-                <Trash2 />
-                Delete schema
-              </MenubarItem>
+              <MenubarGroup>
+                <MenubarLabel>{activeSchema.name}</MenubarLabel>
+                <MenubarItem onClick={onRenameSchema}>
+                  Rename schema…
+                </MenubarItem>
+                <MenubarItem onClick={handleDuplicateSchema}>
+                  <Copy />
+                  Duplicate schema
+                </MenubarItem>
+                <MenubarItem destructive onClick={handleDeleteSchema}>
+                  <Trash2 />
+                  Delete schema
+                </MenubarItem>
+              </MenubarGroup>
               <MenubarSeparator />
             </>
           ) : null}
@@ -362,17 +361,13 @@ export function AppMenubar({
       <MenubarMenu>
         <MenubarTrigger>Help</MenubarTrigger>
         <MenubarContent>
-          <MenubarItem
-            render={
-              <a
-                href="https://github.com/anthropics/claude-code"
-                target="_blank"
-                rel="noopener noreferrer"
-              />
-            }
-          >
-            <Sparkles />
+          <MenubarItem render={<Link href="/docs" />}>
+            <BookOpen />
             Documentation
+          </MenubarItem>
+          <MenubarItem render={<Link href="/settings" />}>
+            <Settings />
+            Settings
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem render={<Link href="/terms" />}>

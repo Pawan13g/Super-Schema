@@ -13,6 +13,10 @@ const patchSchema = z.object({
       relations: z.array(z.unknown()),
     })
     .optional(),
+  // Optimistic-lock guard: client sends the version it last loaded; server
+  // updates only when versions match. Lets two concurrent tabs detect that
+  // their state is stale instead of silently overwriting each other.
+  expectedVersion: z.number().int().nonnegative().optional(),
 });
 
 export async function GET(
@@ -67,6 +71,34 @@ export async function PATCH(
     if (parsed.data.name !== undefined) data.name = parsed.data.name;
     if (parsed.data.schemaJson !== undefined) {
       data.schemaJson = parsed.data.schemaJson as Prisma.InputJsonValue;
+      // Bump version on any content change so optimistic-lock readers
+      // see that their snapshot is stale.
+      data.version = { increment: 1 };
+    }
+
+    if (parsed.data.expectedVersion !== undefined) {
+      // Conditional update — succeeds only if the row's current version
+      // matches what the client thought it was editing.
+      const result = await prisma.schema.updateMany({
+        where: { id, version: parsed.data.expectedVersion },
+        data,
+      });
+      if (result.count === 0) {
+        const current = await prisma.schema.findUnique({
+          where: { id },
+          select: { version: true, updatedAt: true },
+        });
+        return Response.json(
+          {
+            error: "Schema was modified elsewhere. Reload to get the latest.",
+            code: "VERSION_CONFLICT",
+            currentVersion: current?.version ?? null,
+          },
+          { status: 409 }
+        );
+      }
+      const schema = await prisma.schema.findUnique({ where: { id } });
+      return Response.json({ schema });
     }
 
     const schema = await prisma.schema.update({ where: { id }, data });

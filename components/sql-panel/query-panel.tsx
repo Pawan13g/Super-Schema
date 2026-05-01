@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
+import { toast } from "sonner";
 import { useSchema } from "@/lib/schema-store";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Loader } from "@/components/ui/loader";
 import { highlightSql } from "@/lib/sql-highlight";
 import {
   Send,
-  Loader2,
   Zap,
   MessageCircleQuestion,
   Copy,
@@ -32,7 +33,14 @@ async function callAi(action: string, payload: Record<string, string>) {
     body: JSON.stringify({ action, payload }),
   });
   const data = await res.json();
-  if (!res.ok) throw new Error(data.error ?? "AI request failed");
+  if (!res.ok) {
+    if (data.code === "NO_KEY") {
+      toast.error(data.error, {
+        action: { label: "Open settings", onClick: () => (location.href = "/settings") },
+      });
+    }
+    throw new Error(data.error ?? "AI request failed");
+  }
   return data.result;
 }
 
@@ -74,7 +82,9 @@ export function QueryPanel() {
       });
       setGeneratedSql(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to generate query");
+      const msg = err instanceof Error ? err.message : "Failed to generate query";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(null);
     }
@@ -91,7 +101,9 @@ export function QueryPanel() {
       });
       setGeneratedSql(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to optimize query");
+      const msg = err instanceof Error ? err.message : "Failed to optimize query";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(null);
     }
@@ -108,7 +120,9 @@ export function QueryPanel() {
       });
       setExplanation(result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to explain query");
+      const msg = err instanceof Error ? err.message : "Failed to explain query";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(null);
     }
@@ -129,7 +143,9 @@ export function QueryPanel() {
       if (!res.ok) throw new Error(data.error ?? "Query execution failed");
       setQueryResult(data.result);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to run query");
+      const msg = err instanceof Error ? err.message : "Failed to run query";
+      setError(msg);
+      toast.error(msg);
     } finally {
       setLoading(null);
     }
@@ -170,7 +186,7 @@ export function QueryPanel() {
             className="h-8 shrink-0"
           >
             {loading === "generate" ? (
-              <Loader2 className="size-3.5 animate-spin" />
+              <Loader size="sm" />
             ) : (
               <Send className="size-3.5" />
             )}
@@ -208,7 +224,7 @@ export function QueryPanel() {
                     title="Run query on mock data"
                   >
                     {loading === "run" ? (
-                      <Loader2 className="size-3 animate-spin" />
+                      <Loader size="xs" />
                     ) : (
                       <Play className="size-3 text-emerald-500" />
                     )}
@@ -233,7 +249,7 @@ export function QueryPanel() {
                     title="Optimize query"
                   >
                     {loading === "optimize" ? (
-                      <Loader2 className="size-3 animate-spin" />
+                      <Loader size="xs" />
                     ) : (
                       <Zap className="size-3" />
                     )}
@@ -246,7 +262,7 @@ export function QueryPanel() {
                     title="Explain query"
                   >
                     {loading === "explain" ? (
-                      <Loader2 className="size-3 animate-spin" />
+                      <Loader size="xs" />
                     ) : (
                       <MessageCircleQuestion className="size-3" />
                     )}

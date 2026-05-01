@@ -192,8 +192,9 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 type="target"
                 position={Position.Left}
                 id={`${col.id}-target`}
+                title="Drop a relation here"
                 style={{ background: table.color }}
-                className="!-left-[5px] !size-2.5 !rounded-full !border-2 !border-background !opacity-40 transition-opacity hover:!opacity-100 group-hover/node:!opacity-90"
+                className="!-left-[7px] !size-3 !rounded-full !border-2 !border-background !opacity-70 transition-all hover:!scale-125 hover:!opacity-100 group-hover/node:!opacity-100"
               />
               <span
                 className={`flex items-center gap-1 truncate font-mono ${isPk ? "font-semibold text-foreground" : "text-foreground/90"}`}
@@ -221,9 +222,17 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 type="source"
                 position={Position.Right}
                 id={`${col.id}-source`}
+                title="Drag to another column to create a relation"
                 style={{ background: table.color }}
-                className="!-right-[5px] !size-2.5 !rounded-full !border-2 !border-background !opacity-40 transition-opacity hover:!opacity-100 group-hover/node:!opacity-90"
+                className="!-right-[7px] !size-3 !rounded-full !border-2 !border-background !opacity-70 transition-all hover:!scale-125 hover:!opacity-100 group-hover/node:!opacity-100"
               />
+              <span
+                aria-hidden
+                className="pointer-events-none absolute -right-[7px] top-1/2 -translate-y-1/2 opacity-0 transition-opacity group-hover/node:opacity-100"
+                style={{ color: table.color }}
+              >
+                <Link2 className="size-2.5" />
+              </span>
             </div>
           );
         })}

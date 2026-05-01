@@ -1,16 +1,18 @@
 "use client";
 
+import Link from "next/link";
 import { useSession, signOut } from "next-auth/react";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { LogOut, UserCog } from "lucide-react";
+import { BookOpen, LogOut, Settings, UserCog } from "lucide-react";
 
 type Variant = "compact" | "full";
 
@@ -38,6 +40,7 @@ export function UserMenu({ variant = "compact" }: UserMenuProps) {
         className="flex w-full items-center gap-2.5 rounded-lg p-2 text-left transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
       >
         <Avatar className="size-7">
+          {session.user.image ? <AvatarImage src={session.user.image} alt="" /> : null}
           <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
             {initials}
           </AvatarFallback>
@@ -54,6 +57,7 @@ export function UserMenu({ variant = "compact" }: UserMenuProps) {
         className="rounded-full outline-none ring-2 ring-transparent transition-all hover:ring-border focus-visible:ring-ring"
       >
         <Avatar className="size-7">
+          {session.user.image ? <AvatarImage src={session.user.image} alt="" /> : null}
           <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
             {initials}
           </AvatarFallback>
@@ -79,11 +83,21 @@ export function UserMenu({ variant = "compact" }: UserMenuProps) {
           ) : null}
         </div>
         <DropdownMenuSeparator />
-        <DropdownMenuLabel>Account</DropdownMenuLabel>
-        <DropdownMenuItem disabled>
-          <UserCog />
-          Account settings
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Account</DropdownMenuLabel>
+          <DropdownMenuItem render={<Link href="/settings" />}>
+            <Settings />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<Link href="/settings#profile" />}>
+            <UserCog />
+            Profile
+          </DropdownMenuItem>
+          <DropdownMenuItem render={<Link href="/docs" />}>
+            <BookOpen />
+            Documentation
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuItem
           destructive

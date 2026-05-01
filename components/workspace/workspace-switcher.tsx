@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Loader } from "@/components/ui/loader";
 import {
   Check,
   ChevronDown,
@@ -21,7 +22,6 @@ import {
   CloudOff,
   CheckCircle2,
   Database,
-  Loader2,
   Pencil,
   Plus,
   Trash2,
@@ -52,13 +52,20 @@ export function WorkspaceSwitcher() {
 
   useEffect(() => {
     if (!open) return;
-    const handle = (e: MouseEvent) => {
+    const handleClick = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setOpen(false);
       }
     };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("keydown", handleKey);
+    };
   }, [open]);
 
   const handleCreate = async () => {
@@ -220,7 +227,7 @@ export function WorkspaceSwitcher() {
 }
 
 function SaveIndicator({ status }: { status: "idle" | "saving" | "saved" | "error" }) {
-  if (status === "saving") return <span title="Saving…"><Loader2 className="size-3 animate-spin text-muted-foreground" /></span>;
+  if (status === "saving") return <span title="Saving…"><Loader size="xs" /></span>;
   if (status === "saved") return <span title="Saved"><CheckCircle2 className="size-3 text-emerald-500" /></span>;
   if (status === "error") return <span title="Save failed"><CloudOff className="size-3 text-destructive" /></span>;
   return <span title="In sync"><Cloud className="size-3 text-muted-foreground/30" /></span>;

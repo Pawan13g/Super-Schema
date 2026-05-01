@@ -10,7 +10,9 @@ import { parseSqlToSchema, type SqlImportDialect } from "@/lib/sql-import";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Loader2 } from "lucide-react";
+import { toast } from "sonner";
+import { Loader } from "@/components/ui/loader";
+import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Upload } from "lucide-react";
 import { QueryPanel } from "./query-panel";
 
 export function SqlPreview() {
@@ -23,6 +25,30 @@ export function SqlPreview() {
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   const [importDialect, setImportDialect] = useState<SqlImportDialect>("auto");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFilePicked = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    if (!/\.(sql|ddl|txt)$/i.test(file.name)) {
+      toast.error("Pick a .sql, .ddl, or .txt file");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("File too big (max 5 MB)");
+      return;
+    }
+    try {
+      const text = await file.text();
+      setImportSql(text);
+      setImportError(null);
+      setActiveTab("import");
+      toast.success(`Loaded ${file.name}`);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to read file");
+    }
+  };
 
   const sql = useMemo(() => generateSql(schema, dialect), [schema, dialect]);
   const models = useMemo(
@@ -33,6 +59,7 @@ export function SqlPreview() {
   const handleCopy = async () => {
     const text = activeTab === "models" ? models : sql;
     await navigator.clipboard.writeText(text);
+    toast.success("Copied to clipboard");
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -82,10 +109,14 @@ export function SqlPreview() {
       const nextSchema = await parseSqlToSchema(importSql, importDialect);
       replaceSchema(nextSchema);
       setActiveTab("sql");
-    } catch (error) {
-      setImportError(
-        error instanceof Error ? error.message : "Failed to import SQL."
+      toast.success(
+        `Imported ${nextSchema.tables.length} table${nextSchema.tables.length === 1 ? "" : "s"}`
       );
+    } catch (error) {
+      const msg =
+        error instanceof Error ? error.message : "Failed to import SQL.";
+      setImportError(msg);
+      toast.error(msg);
     } finally {
       setImporting(false);
     }
@@ -235,10 +266,28 @@ export function SqlPreview() {
 
         {/* SQL Import tab */}
         <TabsContent value="import" className="flex-1 overflow-hidden">
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".sql,.ddl,.txt,text/plain,application/sql"
+            onChange={handleFilePicked}
+            className="hidden"
+          />
           <div className="flex h-full flex-col">
             <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
-              <div className="text-xs text-muted-foreground">
-                Paste SQL DDL (CREATE TABLE/INDEX). Supports PostgreSQL, MySQL, and SQLite.
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="xs"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={importing}
+                >
+                  <Upload className="size-3" />
+                  Upload .sql
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  or paste DDL below
+                </span>
               </div>
               <Tabs
                 value={importDialect}
@@ -289,11 +338,7 @@ export function SqlPreview() {
                   onClick={handleImportSql}
                   disabled={importing || !importSql.trim()}
                 >
-                  {importing ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : (
-                    "Import to Canvas"
-                  )}
+                  {importing ? <Loader size="xs" /> : "Import to Canvas"}
                 </Button>
               </div>
             </div>

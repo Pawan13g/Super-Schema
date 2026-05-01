@@ -1,13 +1,16 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { signIn } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Database, Layers, Sparkles, Zap } from "lucide-react";
+import { Loader } from "@/components/ui/loader";
+import { OAuthButtons, type OAuthAvailability } from "@/components/auth/oauth-buttons";
+import { Database, Layers, Sparkles, Zap } from "lucide-react";
 
 function BrandPanel() {
   return (
@@ -74,6 +77,38 @@ function SignInForm() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [availability, setAvailability] = useState<OAuthAvailability>({
+    google: false,
+    github: false,
+    microsoft: false,
+  });
+
+  useEffect(() => {
+    fetch("/api/auth/providers")
+      .then((r) => r.json())
+      .then(setAvailability)
+      .catch(() => {});
+  }, []);
+
+  // NextAuth redirects to /sign-in?error=... when OAuth fails. Translate
+  // its error codes into a user-friendly message instead of staying silent.
+  useEffect(() => {
+    const code = params.get("error");
+    if (!code) return;
+    const map: Record<string, string> = {
+      OAuthAccountNotLinked:
+        "That email is already linked to another sign-in method. Use the original method, then connect this provider in Settings.",
+      OAuthCallbackError:
+        "OAuth provider rejected the sign-in. Check the redirect URL in your provider's console.",
+      OAuthSignin: "Could not start the OAuth flow. Try again.",
+      AccessDenied: "Access denied by the OAuth provider.",
+      Configuration: "OAuth is misconfigured on the server.",
+      Verification: "Sign-in link expired or was already used.",
+    };
+    const msg = map[code] ?? `Sign-in failed (${code}).`;
+    setError(msg);
+    toast.error(msg);
+  }, [params]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -83,11 +118,15 @@ function SignInForm() {
     setLoading(false);
     if (res?.error) {
       setError("Invalid email or password.");
+      toast.error("Invalid email or password.");
       return;
     }
+    toast.success("Welcome back!");
     router.push(callbackUrl);
     router.refresh();
   };
+
+  const anyOAuth = availability.google || availability.github || availability.microsoft;
 
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-background px-6 py-12">
@@ -146,9 +185,25 @@ function SignInForm() {
           )}
 
           <Button type="submit" disabled={loading} className="h-10 w-full">
-            {loading ? <Loader2 className="size-4 animate-spin" /> : "Sign in"}
+            {loading ? <Loader size="sm" /> : "Sign in"}
           </Button>
         </form>
+
+        {anyOAuth && (
+          <>
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t" />
+              </div>
+              <div className="relative flex justify-center text-[10px] uppercase tracking-wider">
+                <span className="bg-background px-2 text-muted-foreground">
+                  Or continue with
+                </span>
+              </div>
+            </div>
+            <OAuthButtons callbackUrl={callbackUrl} availability={availability} />
+          </>
+        )}
 
         <p className="text-center text-xs text-muted-foreground">
           By continuing you agree to our{" "}

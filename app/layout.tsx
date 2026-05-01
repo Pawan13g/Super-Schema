@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthSessionProvider } from "@/components/providers/session-provider";
+import { Toaster } from "sonner";
 import "./globals.css";
 
 const inter = Inter({
@@ -33,7 +34,17 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col">
         <AuthSessionProvider>
-          <ThemeProvider>{children}</ThemeProvider>
+          <ThemeProvider>
+            {children}
+            <Toaster
+              richColors
+              closeButton
+              position="top-right"
+              theme="system"
+              offset={56}
+              mobileOffset={56}
+            />
+          </ThemeProvider>
         </AuthSessionProvider>
       </body>
     </html>

@@ -4,6 +4,8 @@ import {
   createContext,
   useCallback,
   useContext,
+  useReducer,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -27,6 +29,9 @@ interface SchemaStore {
   removeTable: (tableId: string) => void;
   updateTableName: (tableId: string, name: string) => void;
   updateTablePosition: (tableId: string, position: { x: number; y: number }) => void;
+  setTablePositions: (
+    positions: Record<string, { x: number; y: number }>
+  ) => void;
   addColumn: (tableId: string) => void;
   removeColumn: (tableId: string, columnId: string) => void;
   updateColumn: (tableId: string, columnId: string, updates: Partial<Column>) => void;
@@ -43,7 +48,14 @@ interface SchemaStore {
   ) => string | null;
   importAiSchema: (generated: GeneratedSchema) => void;
   replaceSchema: (next: Schema) => void;
+  // History
+  undo: () => void;
+  redo: () => void;
+  canUndo: boolean;
+  canRedo: boolean;
 }
+
+const HISTORY_LIMIT = 50;
 
 const SchemaContext = createContext<SchemaStore | null>(null);
 
@@ -74,6 +86,35 @@ function genId(prefix: string) {
   return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000)}`;
 }
 
+// Pick a position for a junction table that avoids overlapping existing
+// nodes. Starts midway-below the parent tables, then nudges down on collision.
+function pickJunctionPosition(
+  existing: Table[],
+  source: Table,
+  target: Table
+): { x: number; y: number } {
+  const baseX =
+    ((source.position.x ?? 100) + (target.position.x ?? 400)) / 2;
+  const baseY =
+    Math.max(source.position.y ?? 100, target.position.y ?? 100) + 260;
+  const nodeWidth = 240;
+  const nodeHeight = 220;
+  let pos = { x: baseX, y: baseY };
+  let attempts = 0;
+  while (
+    existing.some(
+      (t) =>
+        Math.abs((t.position.x ?? 0) - pos.x) < nodeWidth &&
+        Math.abs((t.position.y ?? 0) - pos.y) < nodeHeight
+    ) &&
+    attempts < 12
+  ) {
+    pos = { x: pos.x, y: pos.y + 240 };
+    attempts++;
+  }
+  return pos;
+}
+
 function makeDefaultColumn(): Column {
   return {
     id: genId("col"),
@@ -85,8 +126,67 @@ function makeDefaultColumn(): Column {
 }
 
 export function SchemaProvider({ children }: { children: ReactNode }) {
-  const [schema, setSchema] = useState<Schema>({ tables: [], relations: [] });
+  const [schema, setSchemaRaw] = useState<Schema>({ tables: [], relations: [] });
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+
+  // History stacks (refs to avoid re-render storms; canUndo/canRedo derived
+  // through a tick counter that bumps when stacks change).
+  const historyRef = useRef<{ past: Schema[]; future: Schema[] }>({
+    past: [],
+    future: [],
+  });
+  const [, bumpHistory] = useReducer((c: number) => c + 1, 0);
+
+  const setSchema = useCallback(
+    (
+      next: Schema | ((prev: Schema) => Schema),
+      opts: { skipHistory?: boolean } = {}
+    ) => {
+      setSchemaRaw((prev) => {
+        const computed =
+          typeof next === "function"
+            ? (next as (p: Schema) => Schema)(prev)
+            : next;
+        if (computed === prev) return prev;
+        if (!opts.skipHistory) {
+          const past = historyRef.current.past;
+          past.push(prev);
+          if (past.length > HISTORY_LIMIT) past.shift();
+          historyRef.current.future = [];
+          bumpHistory();
+        }
+        return computed;
+      });
+    },
+    []
+  );
+
+  const undo = useCallback(() => {
+    setSchemaRaw((prev) => {
+      const { past, future } = historyRef.current;
+      if (past.length === 0) return prev;
+      const previous = past.pop()!;
+      future.push(prev);
+      if (future.length > HISTORY_LIMIT) future.shift();
+      bumpHistory();
+      return previous;
+    });
+  }, []);
+
+  const redo = useCallback(() => {
+    setSchemaRaw((prev) => {
+      const { past, future } = historyRef.current;
+      if (future.length === 0) return prev;
+      const nextSchema = future.pop()!;
+      past.push(prev);
+      if (past.length > HISTORY_LIMIT) past.shift();
+      bumpHistory();
+      return nextSchema;
+    });
+  }, []);
+
+  const canUndo = historyRef.current.past.length > 0;
+  const canRedo = historyRef.current.future.length > 0;
 
   const addTable = useCallback((name: string) => {
     const id = genId("tbl");
@@ -130,7 +230,20 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         ),
       }));
     },
-    []
+    [setSchema]
+  );
+
+  // Batched layout update — single history entry covering all moved tables.
+  const setTablePositions = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      setSchema((prev) => ({
+        ...prev,
+        tables: prev.tables.map((t) =>
+          positions[t.id] ? { ...t, position: positions[t.id] } : t
+        ),
+      }));
+    },
+    [setSchema]
   );
 
   const addColumn = useCallback((tableId: string) => {
@@ -279,15 +392,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
           ],
           indexes: [],
           comment: "",
-          position: {
-            x:
-              ((sourceTable.position.x ?? 100) +
-                (targetTable.position.x ?? 400)) /
-              2,
-            y:
-              Math.max(sourceTable.position.y ?? 100, targetTable.position.y ?? 100) +
-              260,
-          },
+          position: pickJunctionPosition(prev.tables, sourceTable, targetTable),
         };
 
         const relationToSource: Relation = {
@@ -317,7 +422,9 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     []
   );
 
-  const importAiSchema = useCallback((generated: GeneratedSchema) => {
+  // remaining mutations use wrapped setSchema directly; declared below.
+
+  const importAiSchemaImpl = (generated: GeneratedSchema): Schema => {
     const GRID_X = 300;
     const GRID_Y = 250;
     const COLS = 3;
@@ -378,17 +485,27 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
       })
       .filter((r): r is Relation => r !== null);
 
-    setSchema({ tables, relations });
-    setSelectedTableId(null);
-  }, []);
+    return { tables, relations };
+  };
 
-  const replaceSchema = useCallback((next: Schema) => {
-    setSchema({
-      tables: next.tables.map((table) => normalizeTable(table)),
-      relations: next.relations,
-    });
-    setSelectedTableId(null);
-  }, []);
+  const importAiSchema = useCallback(
+    (generated: GeneratedSchema) => {
+      setSchema(importAiSchemaImpl(generated));
+      setSelectedTableId(null);
+    },
+    [setSchema]
+  );
+
+  const replaceSchema = useCallback(
+    (next: Schema) => {
+      setSchema({
+        tables: next.tables.map((table) => normalizeTable(table)),
+        relations: next.relations,
+      });
+      setSelectedTableId(null);
+    },
+    [setSchema]
+  );
 
   return (
     <SchemaContext.Provider
@@ -400,6 +517,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         removeTable,
         updateTableName,
         updateTablePosition,
+        setTablePositions,
         addColumn,
         removeColumn,
         updateColumn,
@@ -411,6 +529,10 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         createJunctionTable,
         importAiSchema,
         replaceSchema,
+        undo,
+        redo,
+        canUndo,
+        canRedo,
       }}
     >
       {children}

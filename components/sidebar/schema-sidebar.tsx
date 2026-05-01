@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { FkPickerDialog } from "./fk-picker-dialog";
+import { LintPanel } from "./lint-panel";
 import {
   Select,
   SelectContent,
@@ -246,6 +247,10 @@ export function SchemaSidebar() {
             className="h-8 rounded-md bg-muted/40 pl-8 text-xs"
           />
         </div>
+      </div>
+
+      <div className="border-b px-3 py-2">
+        <LintPanel />
       </div>
 
       <ScrollArea className="flex-1">
