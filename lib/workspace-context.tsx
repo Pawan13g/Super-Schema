@@ -17,6 +17,25 @@ export interface WorkspaceMeta {
   name: string;
   createdAt: string;
   updatedAt: string;
+  _count?: { projects: number };
+}
+
+export interface ProjectMeta {
+  id: string;
+  name: string;
+  description: string | null;
+  workspaceId: string;
+  createdAt: string;
+  updatedAt: string;
+  _count?: { schemas: number };
+}
+
+export interface SchemaMeta {
+  id: string;
+  name: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -24,26 +43,56 @@ type SaveStatus = "idle" | "saving" | "saved" | "error";
 interface WorkspaceStore {
   workspaces: WorkspaceMeta[];
   activeWorkspaceId: string | null;
+  projects: ProjectMeta[];
+  activeProjectId: string | null;
+  schemas: SchemaMeta[];
+  activeSchemaId: string | null;
   loading: boolean;
   saveStatus: SaveStatus;
+
   switchWorkspace: (id: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<WorkspaceMeta | null>;
   renameWorkspace: (id: string, name: string) => Promise<void>;
   deleteWorkspace: (id: string) => Promise<void>;
-  refresh: () => Promise<WorkspaceMeta[] | undefined>;
+
+  switchProject: (id: string) => Promise<void>;
+  createProject: (name: string, description?: string) => Promise<ProjectMeta | null>;
+  renameProject: (id: string, name: string) => Promise<void>;
+  deleteProject: (id: string) => Promise<void>;
+
+  switchSchema: (id: string) => Promise<void>;
+  createSchemaInProject: (name: string) => Promise<SchemaMeta | null>;
+  renameSchema: (id: string, name: string) => Promise<void>;
+  deleteSchema: (id: string) => Promise<void>;
+  duplicateSchema: (id: string) => Promise<SchemaMeta | null>;
+
+  refreshWorkspaces: () => Promise<WorkspaceMeta[] | undefined>;
+  refreshProjects: (workspaceId: string) => Promise<ProjectMeta[] | undefined>;
+  refreshSchemas: (projectId: string) => Promise<SchemaMeta[] | undefined>;
 }
 
 const WorkspaceContext = createContext<WorkspaceStore | null>(null);
-const ACTIVE_KEY = "super-schema:active-workspace";
+const ACTIVE_WORKSPACE_KEY = "super-schema:active-workspace";
+const ACTIVE_PROJECT_KEY = "super-schema:active-project";
+const ACTIVE_SCHEMA_KEY = "super-schema:active-schema";
 const DEBOUNCE_MS = 1000;
+
+function projectKey(workspaceId: string) {
+  return `${ACTIVE_PROJECT_KEY}:${workspaceId}`;
+}
+function schemaKey(projectId: string) {
+  return `${ACTIVE_SCHEMA_KEY}:${projectId}`;
+}
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const { schema, replaceSchema } = useSchema();
 
   const [workspaces, setWorkspaces] = useState<WorkspaceMeta[]>([]);
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(
-    null
-  );
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string | null>(null);
+  const [projects, setProjects] = useState<ProjectMeta[]>([]);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [schemas, setSchemas] = useState<SchemaMeta[]>([]);
+  const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
@@ -51,7 +100,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const skipNextAutosaveRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const refresh = useCallback(async () => {
+  const refreshWorkspaces = useCallback(async () => {
     const res = await fetch("/api/workspaces");
     if (!res.ok) return;
     const data = (await res.json()) as { workspaces: WorkspaceMeta[] };
@@ -59,38 +108,58 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return data.workspaces;
   }, []);
 
-  const loadWorkspace = useCallback(
+  const refreshProjects = useCallback(async (workspaceId: string) => {
+    const res = await fetch(`/api/projects?workspaceId=${workspaceId}`);
+    if (!res.ok) return;
+    const data = (await res.json()) as { projects: ProjectMeta[] };
+    setProjects(data.projects);
+    return data.projects;
+  }, []);
+
+  const refreshSchemas = useCallback(async (projectId: string) => {
+    const res = await fetch(`/api/projects/${projectId}/schemas`);
+    if (!res.ok) return;
+    const data = (await res.json()) as { schemas: SchemaMeta[] };
+    setSchemas(data.schemas);
+    return data.schemas;
+  }, []);
+
+  const loadSchemaIntoCanvas = useCallback(
     async (id: string) => {
-      const res = await fetch(`/api/workspaces/${id}`);
-      if (!res.ok) return;
+      const res = await fetch(`/api/schemas/${id}`);
+      if (!res.ok) return false;
       const data = (await res.json()) as {
-        workspace: { id: string; schemaJson: Schema };
+        schema: { id: string; schemaJson: Schema };
       };
       skipNextAutosaveRef.current = true;
-      lastSavedSchemaRef.current = JSON.stringify(data.workspace.schemaJson);
-      replaceSchema(data.workspace.schemaJson);
-      setActiveWorkspaceId(id);
-      if (typeof window !== "undefined") {
-        localStorage.setItem(ACTIVE_KEY, id);
-      }
+      lastSavedSchemaRef.current = JSON.stringify(data.schema.schemaJson);
+      replaceSchema(data.schema.schemaJson);
+      setActiveSchemaId(id);
+      return true;
     },
     [replaceSchema]
   );
 
-  // Pick initial active workspace: localStorage → first → create default
+  // Bootstrap: load workspaces -> active workspace -> projects -> active project -> schemas -> active schema
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const list = await refresh();
-      if (cancelled || !list) return;
+      const wsList = await refreshWorkspaces();
+      if (cancelled || !wsList) {
+        setLoading(false);
+        return;
+      }
 
-      let nextId: string | null = null;
-      const saved =
-        typeof window !== "undefined" ? localStorage.getItem(ACTIVE_KEY) : null;
-      if (saved && list.some((w) => w.id === saved)) nextId = saved;
-      else if (list[0]) nextId = list[0].id;
+      // Pick or create workspace
+      let wsId: string | null = null;
+      const savedWs =
+        typeof window !== "undefined"
+          ? localStorage.getItem(ACTIVE_WORKSPACE_KEY)
+          : null;
+      if (savedWs && wsList.some((w) => w.id === savedWs)) wsId = savedWs;
+      else if (wsList[0]) wsId = wsList[0].id;
 
-      if (!nextId) {
+      if (!wsId) {
         const res = await fetch("/api/workspaces", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -98,28 +167,161 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         });
         if (res.ok) {
           const created = (await res.json()) as { workspace: WorkspaceMeta };
-          await refresh();
-          nextId = created.workspace.id;
+          await refreshWorkspaces();
+          wsId = created.workspace.id;
         }
       }
+      if (cancelled || !wsId) {
+        setLoading(false);
+        return;
+      }
+      setActiveWorkspaceId(wsId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, wsId);
+      }
 
-      if (nextId) await loadWorkspace(nextId);
+      // Projects
+      const projList = await refreshProjects(wsId);
+      if (cancelled || !projList) {
+        setLoading(false);
+        return;
+      }
+      let prjId: string | null = null;
+      const savedPrj =
+        typeof window !== "undefined" ? localStorage.getItem(projectKey(wsId)) : null;
+      if (savedPrj && projList.some((p) => p.id === savedPrj)) prjId = savedPrj;
+      else if (projList[0]) prjId = projList[0].id;
+
+      if (!prjId) {
+        // No projects in workspace — create a default
+        const res = await fetch("/api/projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ workspaceId: wsId, name: "Default Project" }),
+        });
+        if (res.ok) {
+          const created = (await res.json()) as { project: ProjectMeta };
+          await refreshProjects(wsId);
+          prjId = created.project.id;
+        }
+      }
+      if (cancelled || !prjId) {
+        setLoading(false);
+        return;
+      }
+      setActiveProjectId(prjId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(projectKey(wsId), prjId);
+      }
+
+      // Schemas
+      const schList = await refreshSchemas(prjId);
+      if (cancelled || !schList) {
+        setLoading(false);
+        return;
+      }
+      let schId: string | null = null;
+      const savedSch =
+        typeof window !== "undefined" ? localStorage.getItem(schemaKey(prjId)) : null;
+      if (savedSch && schList.some((s) => s.id === savedSch)) schId = savedSch;
+      else if (schList[0]) schId = schList[0].id;
+
+      if (!schId) {
+        const res = await fetch(`/api/projects/${prjId}/schemas`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: "Main Schema" }),
+        });
+        if (res.ok) {
+          const created = (await res.json()) as { schema: SchemaMeta };
+          await refreshSchemas(prjId);
+          schId = created.schema.id;
+        }
+      }
+      if (cancelled || !schId) {
+        setLoading(false);
+        return;
+      }
+
+      await loadSchemaIntoCanvas(schId);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(schemaKey(prjId), schId);
+      }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, [refresh, loadWorkspace]);
+  }, [refreshWorkspaces, refreshProjects, refreshSchemas, loadSchemaIntoCanvas]);
+
+  // Cancel pending saves when active schema changes
+  const cancelPendingSave = () => {
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = null;
+    }
+  };
+
+  const switchSchema = useCallback(
+    async (id: string) => {
+      cancelPendingSave();
+      await loadSchemaIntoCanvas(id);
+      if (activeProjectId && typeof window !== "undefined") {
+        localStorage.setItem(schemaKey(activeProjectId), id);
+      }
+    },
+    [loadSchemaIntoCanvas, activeProjectId]
+  );
+
+  const switchProject = useCallback(
+    async (id: string) => {
+      cancelPendingSave();
+      setActiveProjectId(id);
+      if (activeWorkspaceId && typeof window !== "undefined") {
+        localStorage.setItem(projectKey(activeWorkspaceId), id);
+      }
+      const list = await refreshSchemas(id);
+      if (!list) return;
+
+      const savedSch =
+        typeof window !== "undefined" ? localStorage.getItem(schemaKey(id)) : null;
+      const next =
+        (savedSch && list.find((s) => s.id === savedSch)?.id) ?? list[0]?.id ?? null;
+      if (next) {
+        await loadSchemaIntoCanvas(next);
+        if (typeof window !== "undefined") localStorage.setItem(schemaKey(id), next);
+      } else {
+        setActiveSchemaId(null);
+        replaceSchema({ tables: [], relations: [] });
+      }
+    },
+    [refreshSchemas, loadSchemaIntoCanvas, activeWorkspaceId, replaceSchema]
+  );
 
   const switchWorkspace = useCallback(
     async (id: string) => {
-      if (saveTimerRef.current) {
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = null;
+      cancelPendingSave();
+      setActiveWorkspaceId(id);
+      if (typeof window !== "undefined") {
+        localStorage.setItem(ACTIVE_WORKSPACE_KEY, id);
       }
-      await loadWorkspace(id);
+      const list = await refreshProjects(id);
+      if (!list) return;
+
+      const savedPrj =
+        typeof window !== "undefined" ? localStorage.getItem(projectKey(id)) : null;
+      const nextProject =
+        (savedPrj && list.find((p) => p.id === savedPrj)?.id) ?? list[0]?.id ?? null;
+      if (nextProject) {
+        await switchProject(nextProject);
+      } else {
+        setActiveProjectId(null);
+        setSchemas([]);
+        setActiveSchemaId(null);
+        replaceSchema({ tables: [], relations: [] });
+      }
     },
-    [loadWorkspace]
+    [refreshProjects, switchProject, replaceSchema]
   );
 
   const createWorkspace = useCallback(
@@ -131,11 +333,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       });
       if (!res.ok) return null;
       const data = (await res.json()) as { workspace: WorkspaceMeta };
-      await refresh();
-      await loadWorkspace(data.workspace.id);
+      await refreshWorkspaces();
+      await switchWorkspace(data.workspace.id);
       return data.workspace;
     },
-    [refresh, loadWorkspace]
+    [refreshWorkspaces, switchWorkspace]
   );
 
   const renameWorkspace = useCallback(
@@ -145,28 +347,158 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      if (res.ok) await refresh();
+      if (res.ok) await refreshWorkspaces();
     },
-    [refresh]
+    [refreshWorkspaces]
   );
 
   const deleteWorkspace = useCallback(
     async (id: string) => {
       const res = await fetch(`/api/workspaces/${id}`, { method: "DELETE" });
       if (!res.ok) return;
-      const list = (await refresh()) ?? [];
+      const list = (await refreshWorkspaces()) ?? [];
       if (id === activeWorkspaceId) {
         const next = list[0]?.id;
-        if (next) await loadWorkspace(next);
-        else setActiveWorkspaceId(null);
+        if (next) await switchWorkspace(next);
+        else {
+          setActiveWorkspaceId(null);
+          setProjects([]);
+          setActiveProjectId(null);
+          setSchemas([]);
+          setActiveSchemaId(null);
+          replaceSchema({ tables: [], relations: [] });
+        }
       }
     },
-    [refresh, activeWorkspaceId, loadWorkspace]
+    [refreshWorkspaces, activeWorkspaceId, switchWorkspace, replaceSchema]
   );
 
-  // Debounced auto-save on schema change
+  const createProject = useCallback(
+    async (name: string, description?: string): Promise<ProjectMeta | null> => {
+      if (!activeWorkspaceId) return null;
+      const res = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: activeWorkspaceId,
+          name,
+          description,
+        }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { project: ProjectMeta };
+      await refreshProjects(activeWorkspaceId);
+      await switchProject(data.project.id);
+      return data.project;
+    },
+    [activeWorkspaceId, refreshProjects, switchProject]
+  );
+
+  const renameProject = useCallback(
+    async (id: string, name: string) => {
+      const res = await fetch(`/api/projects/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok && activeWorkspaceId) await refreshProjects(activeWorkspaceId);
+    },
+    [refreshProjects, activeWorkspaceId]
+  );
+
+  const deleteProject = useCallback(
+    async (id: string) => {
+      if (!activeWorkspaceId) return;
+      const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      const list = (await refreshProjects(activeWorkspaceId)) ?? [];
+      if (id === activeProjectId) {
+        const next = list[0]?.id;
+        if (next) await switchProject(next);
+        else {
+          setActiveProjectId(null);
+          setSchemas([]);
+          setActiveSchemaId(null);
+          replaceSchema({ tables: [], relations: [] });
+        }
+      }
+    },
+    [
+      refreshProjects,
+      activeWorkspaceId,
+      activeProjectId,
+      switchProject,
+      replaceSchema,
+    ]
+  );
+
+  const createSchemaInProject = useCallback(
+    async (name: string): Promise<SchemaMeta | null> => {
+      if (!activeProjectId) return null;
+      const res = await fetch(`/api/projects/${activeProjectId}/schemas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { schema: SchemaMeta };
+      await refreshSchemas(activeProjectId);
+      await switchSchema(data.schema.id);
+      return data.schema;
+    },
+    [activeProjectId, refreshSchemas, switchSchema]
+  );
+
+  const renameSchema = useCallback(
+    async (id: string, name: string) => {
+      const res = await fetch(`/api/schemas/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok && activeProjectId) await refreshSchemas(activeProjectId);
+    },
+    [refreshSchemas, activeProjectId]
+  );
+
+  const deleteSchema = useCallback(
+    async (id: string) => {
+      if (!activeProjectId) return;
+      const res = await fetch(`/api/schemas/${id}`, { method: "DELETE" });
+      if (!res.ok) return;
+      const list = (await refreshSchemas(activeProjectId)) ?? [];
+      if (id === activeSchemaId) {
+        const next = list[0]?.id;
+        if (next) await switchSchema(next);
+        else {
+          setActiveSchemaId(null);
+          replaceSchema({ tables: [], relations: [] });
+        }
+      }
+    },
+    [
+      refreshSchemas,
+      activeProjectId,
+      activeSchemaId,
+      switchSchema,
+      replaceSchema,
+    ]
+  );
+
+  const duplicateSchema = useCallback(
+    async (id: string): Promise<SchemaMeta | null> => {
+      const res = await fetch(`/api/schemas/${id}/duplicate`, { method: "POST" });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { schema: SchemaMeta };
+      if (activeProjectId) await refreshSchemas(activeProjectId);
+      return data.schema;
+    },
+    [refreshSchemas, activeProjectId]
+  );
+
+  // Debounced auto-save on schema change → save to active schema
   useEffect(() => {
-    if (!activeWorkspaceId) return;
+    if (!activeSchemaId) return;
 
     const serialized = JSON.stringify(schema);
     if (skipNextAutosaveRef.current) {
@@ -180,7 +512,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     saveTimerRef.current = setTimeout(async () => {
       setSaveStatus("saving");
       try {
-        const res = await fetch(`/api/workspaces/${activeWorkspaceId}`, {
+        const res = await fetch(`/api/schemas/${activeSchemaId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ schemaJson: schema }),
@@ -200,20 +532,35 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [schema, activeWorkspaceId]);
+  }, [schema, activeSchemaId]);
 
   return (
     <WorkspaceContext.Provider
       value={{
         workspaces,
         activeWorkspaceId,
+        projects,
+        activeProjectId,
+        schemas,
+        activeSchemaId,
         loading,
         saveStatus,
         switchWorkspace,
         createWorkspace,
         renameWorkspace,
         deleteWorkspace,
-        refresh,
+        switchProject,
+        createProject,
+        renameProject,
+        deleteProject,
+        switchSchema,
+        createSchemaInProject,
+        renameSchema,
+        deleteSchema,
+        duplicateSchema,
+        refreshWorkspaces,
+        refreshProjects,
+        refreshSchemas,
       }}
     >
       {children}

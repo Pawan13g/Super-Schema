@@ -1,17 +1,10 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
-import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
-  schemaJson: z
-    .object({
-      tables: z.array(z.unknown()),
-      relations: z.array(z.unknown()),
-    })
-    .optional(),
 });
 
 export async function GET() {
@@ -28,6 +21,7 @@ export async function GET() {
       name: true,
       createdAt: true,
       updatedAt: true,
+      _count: { select: { projects: true } },
     },
   });
 
@@ -46,16 +40,11 @@ export async function POST(request: NextRequest) {
     if (!parsed.success) {
       return Response.json({ error: "Invalid input" }, { status: 400 });
     }
-
     const workspace = await prisma.workspace.create({
       data: {
         ownerId: session.user.id,
         name: parsed.data.name,
-        schemaJson: (parsed.data.schemaJson ?? {
-          tables: [],
-          relations: [],
-        }) as Prisma.InputJsonValue,
-      },
+      } as any,
     });
 
     return Response.json({ workspace });

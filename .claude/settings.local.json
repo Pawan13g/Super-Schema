@@ -5,7 +5,11 @@
       "Bash(npx eslint *)",
       "Bash(npm install *)",
       "Bash(node *)",
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(npx next *)",
+      "Bash(curl -sI http://localhost:3000/sql-wasm-browser.wasm)",
+      "Bash(echo \"EXIT=$?\")",
+      "Bash(echo \"TSC=$?\")"
     ]
   }
 }

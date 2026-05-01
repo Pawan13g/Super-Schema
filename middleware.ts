@@ -4,7 +4,16 @@ import { authConfig } from "@/lib/auth.config";
 
 const { auth } = NextAuth(authConfig);
 
-const PUBLIC_PATHS = ["/sign-in", "/sign-up", "/api/sign-in", "/api/sign-up"];
+const PUBLIC_PATHS = [
+  "/sign-in",
+  "/sign-up",
+  "/api/sign-in",
+  "/api/sign-up",
+  "/terms",
+  "/privacy",
+];
+
+const PUBLIC_REDIRECT_PATHS = ["/sign-in", "/sign-up"];
 
 export default auth((req) => {
   const { pathname } = req.nextUrl;
@@ -12,7 +21,8 @@ export default auth((req) => {
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/_next") ||
-    pathname === "/favicon.ico"
+    pathname === "/favicon.ico" ||
+    /\.(?:wasm|svg|png|jpg|jpeg|gif|webp|ico|woff2?|ttf|otf|map)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }
@@ -25,7 +35,8 @@ export default auth((req) => {
     return NextResponse.redirect(url);
   }
 
-  if (isLoggedIn && isPublic) {
+  const isAuthRoute = PUBLIC_REDIRECT_PATHS.some((p) => pathname.startsWith(p));
+  if (isLoggedIn && isAuthRoute) {
     return NextResponse.redirect(new URL("/", req.url));
   }
 

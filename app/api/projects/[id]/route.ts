@@ -2,10 +2,11 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { userOwnsWorkspace } from "@/lib/authz";
+import { getProjectIfOwned } from "@/lib/authz";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(100).optional(),
+  description: z.string().max(500).nullable().optional(),
 });
 
 export async function GET(
@@ -18,27 +19,35 @@ export async function GET(
   }
   const { id } = await params;
 
-  const workspace = await prisma.workspace.findUnique({
-    where: { id },
-    include: {
-      projects: {
-        orderBy: { updatedAt: "desc" },
-        select: {
-          id: true,
-          name: true,
-          description: true,
-          createdAt: true,
-          updatedAt: true,
-          _count: { select: { schemas: true } },
-        },
-      },
-    },
-  });
-  if (!workspace || workspace.ownerId !== session.user.id) {
+  const project = await getProjectIfOwned(id, session.user.id);
+  if (!project) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  return Response.json({ workspace });
+  const schemas = await prisma.schema.findMany({
+    where: { projectId: id },
+    orderBy: { updatedAt: "desc" },
+    select: {
+      id: true,
+      name: true,
+      version: true,
+      createdAt: true,
+      updatedAt: true,
+    },
+  });
+
+  return Response.json({
+    project: {
+      id: project.id,
+      name: project.name,
+      description: project.description,
+      workspaceId: project.workspaceId,
+      createdAt: project.createdAt,
+      updatedAt: project.updatedAt,
+    },
+    workspace: { id: project.workspace.id },
+    schemas,
+  });
 }
 
 export async function PATCH(
@@ -51,9 +60,8 @@ export async function PATCH(
   }
   const { id } = await params;
 
-  if (!(await userOwnsWorkspace(id, session.user.id))) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
+  const owned = await getProjectIfOwned(id, session.user.id);
+  if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
 
   try {
     const body = await request.json();
@@ -62,12 +70,12 @@ export async function PATCH(
       return Response.json({ error: "Invalid input" }, { status: 400 });
     }
 
-    const workspace = await prisma.workspace.update({
+    const project = await prisma.project.update({
       where: { id },
       data: parsed.data,
     });
 
-    return Response.json({ workspace });
+    return Response.json({ project });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Update failed";
     return Response.json({ error: message }, { status: 500 });
@@ -84,10 +92,9 @@ export async function DELETE(
   }
   const { id } = await params;
 
-  if (!(await userOwnsWorkspace(id, session.user.id))) {
-    return Response.json({ error: "Not found" }, { status: 404 });
-  }
+  const owned = await getProjectIfOwned(id, session.user.id);
+  if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.workspace.delete({ where: { id } });
+  await prisma.project.delete({ where: { id } });
   return Response.json({ ok: true });
 }

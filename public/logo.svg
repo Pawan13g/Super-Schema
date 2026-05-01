@@ -1,0 +1,8 @@
+<svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <!-- Bars scaled proportionally -->
+  <rect x="10" y="50" width="12" height="55" rx="6" fill="#a78bfa"></rect>
+  <rect x="30" y="30" width="12" height="75" rx="6" fill="#8b5cf6"></rect>
+  <rect x="50" y="15" width="12" height="90" rx="6" fill="#7c3aed"></rect>
+  <rect x="70" y="35" width="12" height="70" rx="6" fill="#8b5cf6"></rect>
+  <rect x="90" y="55" width="12" height="50" rx="6" fill="#a78bfa"></rect>
+</svg>

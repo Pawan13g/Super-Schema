@@ -1,0 +1,201 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
+import { useWorkspace } from "@/lib/workspace-context";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  FolderOpen,
+  LayoutDashboard,
+  Plus,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+export function ProjectSchemaNav() {
+  const {
+    projects,
+    activeProjectId,
+    schemas,
+    activeSchemaId,
+    switchProject,
+    switchSchema,
+    createSchemaInProject,
+  } = useWorkspace();
+
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [schemaOpen, setSchemaOpen] = useState(false);
+  const [newSchemaMode, setNewSchemaMode] = useState(false);
+  const [newSchemaName, setNewSchemaName] = useState("");
+  const projectRef = useRef<HTMLDivElement>(null);
+  const schemaRef = useRef<HTMLDivElement>(null);
+
+  const activeProject = projects.find((p) => p.id === activeProjectId);
+  const activeSchema = schemas.find((s) => s.id === activeSchemaId);
+
+  useEffect(() => {
+    const handle = (e: MouseEvent) => {
+      if (projectRef.current && !projectRef.current.contains(e.target as Node)) setProjectOpen(false);
+      if (schemaRef.current && !schemaRef.current.contains(e.target as Node)) {
+        setSchemaOpen(false);
+        setNewSchemaMode(false);
+        setNewSchemaName("");
+      }
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, []);
+
+  const handleCreateSchema = async () => {
+    const name = newSchemaName.trim();
+    if (!name) return;
+    await createSchemaInProject(name);
+    setNewSchemaName("");
+    setNewSchemaMode(false);
+    setSchemaOpen(false);
+  };
+
+  return (
+    <div className="flex items-center gap-0">
+      <ChevronRight className="size-3.5 text-muted-foreground/50" />
+
+      {/* Project picker */}
+      <div className="relative" ref={projectRef}>
+        <button
+          onClick={() => { setProjectOpen((v) => !v); setSchemaOpen(false); }}
+          className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-sm hover:bg-accent"
+        >
+          <FolderOpen className="size-3.5 shrink-0 text-blue-500" />
+          <span className="max-w-[130px] truncate font-medium">
+            {activeProject?.name ?? "Project"}
+          </span>
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        </button>
+
+        {projectOpen && (
+          <div className="absolute left-0 top-9 z-50 min-w-[220px] rounded-xl border bg-popover p-1.5 shadow-xl">
+            <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Switch project
+            </p>
+            <div className="max-h-[240px] overflow-y-auto">
+              {projects.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">No projects.</p>
+              )}
+              {projects.map((p) => {
+                const isActive = p.id === activeProjectId;
+                return (
+                  <button
+                    key={p.id}
+                    onClick={() => { if (!isActive) switchProject(p.id); setProjectOpen(false); }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm",
+                      isActive ? "bg-accent font-medium" : "hover:bg-accent/60"
+                    )}
+                  >
+                    {isActive ? (
+                      <Check className="size-3.5 shrink-0 text-primary" />
+                    ) : (
+                      <FolderOpen className="size-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate">{p.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="my-1.5 h-px bg-border" />
+            <Link
+              href="/projects"
+              onClick={() => setProjectOpen(false)}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
+            >
+              <LayoutDashboard className="size-3.5" />
+              Manage projects
+            </Link>
+          </div>
+        )}
+      </div>
+
+      <ChevronRight className="size-3.5 text-muted-foreground/50" />
+
+      {/* Schema picker */}
+      <div className="relative" ref={schemaRef}>
+        <button
+          onClick={() => { setSchemaOpen((v) => !v); setProjectOpen(false); }}
+          disabled={!activeProjectId}
+          className="flex h-7 items-center gap-1.5 rounded-lg px-2 text-sm hover:bg-accent disabled:opacity-50"
+        >
+          <FileText className="size-3.5 shrink-0 text-emerald-500" />
+          <span className="max-w-[130px] truncate font-medium">
+            {activeSchema?.name ?? "Schema"}
+          </span>
+          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
+        </button>
+
+        {schemaOpen && (
+          <div className="absolute left-0 top-9 z-50 min-w-[220px] rounded-xl border bg-popover p-1.5 shadow-xl">
+            <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Switch schema
+            </p>
+            <div className="max-h-[240px] overflow-y-auto">
+              {schemas.length === 0 && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground">No schemas.</p>
+              )}
+              {schemas.map((s) => {
+                const isActive = s.id === activeSchemaId;
+                return (
+                  <button
+                    key={s.id}
+                    onClick={() => { if (!isActive) switchSchema(s.id); setSchemaOpen(false); }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm",
+                      isActive ? "bg-accent font-medium" : "hover:bg-accent/60"
+                    )}
+                  >
+                    {isActive ? (
+                      <Check className="size-3.5 shrink-0 text-primary" />
+                    ) : (
+                      <FileText className="size-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                    <span className="truncate">{s.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="my-1.5 h-px bg-border" />
+            {newSchemaMode ? (
+              <div className="flex gap-1.5 px-1">
+                <Input
+                  autoFocus
+                  value={newSchemaName}
+                  onChange={(e) => setNewSchemaName(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleCreateSchema();
+                    if (e.key === "Escape") { setNewSchemaMode(false); setNewSchemaName(""); }
+                  }}
+                  placeholder="Schema name…"
+                  className="h-7 flex-1 text-xs"
+                />
+                <Button size="sm" className="h-7 px-2.5" onClick={handleCreateSchema} disabled={!newSchemaName.trim()}>
+                  Add
+                </Button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setNewSchemaMode(true)}
+                disabled={!activeProjectId}
+                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-primary hover:bg-accent"
+              >
+                <Plus className="size-3.5" />
+                New schema
+              </button>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}

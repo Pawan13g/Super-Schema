@@ -177,7 +177,9 @@ export async function runMockQuery(
   }
 
   // Init sql.js
-  const SQL = await initSqlJs();
+  const SQL = await initSqlJs({
+    locateFile: (file: string) => `/${file}`,
+  });
   const db: Database = new SQL.Database();
 
   try {

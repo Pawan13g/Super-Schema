@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "next-themes";
 import {
   ReactFlow,
@@ -14,6 +14,7 @@ import {
   type OnNodesChange,
   type Connection,
   type OnNodeDrag,
+  type ReactFlowInstance,
   MarkerType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
@@ -69,9 +70,14 @@ export function SchemaCanvas() {
   } = useSchema();
 
   const { resolvedTheme } = useTheme();
-  const colorMode = resolvedTheme === "dark" ? "dark" : "light";
+  // Avoid hydration mismatch: only compute theme-aware mode after client mount.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const colorMode = mounted && resolvedTheme === "dark" ? "dark" : "light";
 
   const [nodes, setNodes] = useState<Node[]>([]);
+  const reactFlowInstanceRef = useRef<ReactFlowInstance | null>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [menu, setMenu] = useState<MenuState>(null);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [relationDialogOpen, setRelationDialogOpen] = useState(false);
@@ -417,12 +423,48 @@ export function SchemaCanvas() {
     };
   })();
 
+  const onDragOver = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (
+      e.dataTransfer.types.includes("application/super-schema-table")
+    ) {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+    }
+  }, []);
+
+  const onDrop = useCallback(
+    (e: React.DragEvent<HTMLDivElement>) => {
+      const tableId = e.dataTransfer.getData("application/super-schema-table");
+      if (!tableId) return;
+      e.preventDefault();
+      const instance = reactFlowInstanceRef.current;
+      if (!instance) return;
+      const position = instance.screenToFlowPosition({
+        x: e.clientX,
+        y: e.clientY,
+      });
+      updateTablePosition(tableId, position);
+      setSelectedTableId(tableId);
+    },
+    [updateTablePosition, setSelectedTableId]
+  );
+
   return (
-    <div className="relative h-full w-full">
+    // Ensure React Flow parent has an explicit minimum height so it can measure
+    // and render correctly; also keeps hydration stable across SSR/CSR.
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full min-h-[60vh]"
+      onDragOver={onDragOver}
+      onDrop={onDrop}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onInit={(instance) => {
+          reactFlowInstanceRef.current = instance;
+        }}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}

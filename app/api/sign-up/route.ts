@@ -12,7 +12,6 @@ const bodySchema = z.object({
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    console.log(body)
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -36,18 +35,35 @@ export async function POST(request: NextRequest) {
       select: { id: true, email: true, name: true },
     });
 
-    // Seed first workspace
-    await prisma.workspace.create({
-      data: {
-        ownerId: user.id,
-        name: "My Workspace",
-        schemaJson: { tables: [], relations: [] },
-      },
+    // Seed the initial workspace/project/schema explicitly to avoid nested
+    // write edge cases during sign-up.
+    await prisma.$transaction(async (tx) => {
+      const workspace = await tx.workspace.create({
+        data: {
+          ownerId: user.id,
+          name: "My Workspace",
+        },
+      });
+
+      const project = await tx.project.create({
+        data: {
+          workspaceId: workspace.id,
+          name: "Default Project",
+          description: null,
+        },
+      });
+
+      await tx.schema.create({
+        data: {
+          projectId: project.id,
+          name: "Main Schema",
+          schemaJson: { tables: [], relations: [] },
+        },
+      });
     });
 
     return Response.json({ user });
   } catch (err) {
-    console.log(err)
     const message = err instanceof Error ? err.message : "Sign-up failed";
     return Response.json({ error: message }, { status: 500 });
   }

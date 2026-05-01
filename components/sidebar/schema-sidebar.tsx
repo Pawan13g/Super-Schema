@@ -274,13 +274,27 @@ export function SchemaSidebar() {
             };
             const commentDraft = commentDrafts[table.id] ?? table.comment ?? "";
 
+            const handleDragStart = (e: React.DragEvent<HTMLDivElement>) => {
+              e.dataTransfer.setData(
+                "application/super-schema-table",
+                table.id
+              );
+              e.dataTransfer.setData("text/plain", table.name);
+              e.dataTransfer.effectAllowed = "move";
+            };
+
             return (
               <div
                 key={table.id}
                 className={`border-b last:border-b-0 ${isSelected ? "bg-muted/30" : ""}`}
               >
-                <div className="flex items-center gap-1.5 px-2 py-1.5">
-                  <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/30" />
+                <div
+                  className="group/table flex items-center gap-1.5 px-2 py-1.5"
+                  draggable={renamingTableId !== table.id}
+                  onDragStart={handleDragStart}
+                  title="Drag to reposition on the canvas"
+                >
+                  <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/30 group-hover/table:text-muted-foreground" />
                   <Table2
                     className="size-3.5 shrink-0"
                     style={{ color: table.color }}

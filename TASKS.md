@@ -95,7 +95,7 @@
 
 ## 📦 Data Model Updates (Prisma)
 
-* [ ] Add `Project` model
+* [x] Add `Project` model
 
   * id
   * name
@@ -103,7 +103,7 @@
   * workspaceId (relation)
   * createdAt / updatedAt
 
-* [ ] Update `Schema` model
+* [x] Update `Schema` model
 
   * add `projectId`
   * allow multiple schemas per project
@@ -118,17 +118,18 @@
 
 ## 🧭 Backend / API
 
-* [ ] Create project routes:
+* [x] Create project routes:
 
   * `/api/projects` (CRUD)
   * `/api/projects/[id]`
 
-* [ ] Update schema routes:
+* [x] Update schema routes:
 
-  * `/api/projects/[projectId]/schemas`
+  * `/api/projects/[id]/schemas`
   * `/api/schemas/[id]`
+  * `/api/schemas/[id]/duplicate`
 
-* [ ] Implement:
+* [x] Implement:
 
   * create project
   * rename/delete project
@@ -138,17 +139,17 @@
 
 ## 🖥️ Frontend UI
 
-* [ ] Add **Project Dashboard**
+* [x] Add **Project Dashboard**
 
   * grid/list view of projects
   * create new project modal
 
-* [ ] Inside project:
+* [x] Inside project:
 
   * schema list panel (like files)
   * “+ New Schema” button
 
-* [ ] Navigation structure:
+* [x] Navigation structure:
 
   ```
   Workspace
@@ -162,10 +163,10 @@
 
 ## 🔁 Schema Management Features
 
-* [ ] Duplicate schema
-* [ ] Rename schema
-* [ ] Delete schema
-* [ ] Switch between schemas (load into canvas)
+* [x] Duplicate schema
+* [x] Rename schema
+* [x] Delete schema
+* [x] Switch between schemas (load into canvas)
 
 ---
 
@@ -178,12 +179,12 @@
 
 ## ⚡ UX Enhancements
 
-* [ ] Breadcrumb navigation:
+* [x] Breadcrumb navigation:
 
   ```
   Workspace > Project > Schema
   ```
 
-* [ ] Autosave per schema (already exists → just scope it correctly)
+* [x] Autosave per schema (already exists → now scoped to active schema)
 
 * [ ] Recent projects / schemas

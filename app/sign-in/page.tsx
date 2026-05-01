@@ -7,7 +7,63 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Loader2, Database } from "lucide-react";
+import { Loader2, Database, Layers, Sparkles, Zap } from "lucide-react";
+
+function BrandPanel() {
+  return (
+    <div className="relative hidden flex-col justify-between overflow-hidden bg-gradient-to-br from-violet-950 via-violet-900 to-indigo-900 p-10 lg:flex lg:w-[48%]">
+      <div
+        className="absolute inset-0 opacity-10"
+        style={{
+          backgroundImage:
+            "linear-gradient(oklch(1 0 0 / 0.15) 1px, transparent 1px), linear-gradient(90deg, oklch(1 0 0 / 0.15) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+        }}
+      />
+      <div className="absolute -top-32 -left-32 size-[500px] rounded-full bg-violet-600/20 blur-3xl" />
+      <div className="absolute -bottom-32 -right-32 size-[400px] rounded-full bg-indigo-600/20 blur-3xl" />
+
+      <div className="relative z-10 flex items-center gap-2.5">
+        <div className="flex size-9 items-center justify-center rounded-lg bg-white/10 backdrop-blur-sm ring-1 ring-white/20">
+          <Database className="size-5 text-white" />
+        </div>
+        <span className="text-lg font-bold text-white">Super Schema</span>
+      </div>
+
+      <div className="relative z-10 space-y-6">
+        <div>
+          <h2 className="text-3xl font-bold leading-tight text-white">
+            Design databases visually,<br />ship schemas faster.
+          </h2>
+          <p className="mt-3 text-sm text-violet-200/80">
+            AI-powered schema design, multi-dialect SQL generation, and real-time collaboration — all in one canvas.
+          </p>
+        </div>
+        <ul className="space-y-3">
+          {[
+            { icon: Layers, text: "Visual table editor with drag-and-drop" },
+            { icon: Sparkles, text: "AI schema generation from plain English" },
+            { icon: Zap, text: "Export SQL for PostgreSQL, MySQL & SQLite" },
+          ].map(({ icon: Icon, text }) => (
+            <li key={text} className="flex items-center gap-3">
+              <div className="flex size-7 shrink-0 items-center justify-center rounded-md bg-white/10 ring-1 ring-white/15">
+                <Icon className="size-3.5 text-violet-200" />
+              </div>
+              <span className="text-sm text-violet-100/90">{text}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+
+      <div className="relative z-10 rounded-xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
+        <p className="text-sm italic text-violet-100/80">
+          &ldquo;Super Schema saves us hours every sprint — schema design used to take days.&rdquo;
+        </p>
+        <p className="mt-2 text-xs font-medium text-violet-300">— Engineering Lead, Series B startup</p>
+      </div>
+    </div>
+  );
+}
 
 function SignInForm() {
   const router = useRouter();
@@ -23,11 +79,7 @@ function SignInForm() {
     e.preventDefault();
     setError("");
     setLoading(true);
-    const res = await signIn("credentials", {
-      email,
-      password,
-      redirect: false,
-    });
+    const res = await signIn("credentials", { email, password, redirect: false });
     setLoading(false);
     if (res?.error) {
       setError("Invalid email or password.");
@@ -38,70 +90,88 @@ function SignInForm() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-muted/30 p-4">
-      <div className="w-full max-w-sm rounded-xl border bg-card p-6 shadow-sm">
-        <div className="mb-6 flex flex-col items-center gap-2">
-          <div className="rounded-lg bg-violet-500/10 p-2">
-            <Database className="size-6 text-violet-600 dark:text-violet-400" />
-          </div>
-          <h1 className="text-xl font-bold tracking-tight">Welcome back</h1>
-          <p className="text-xs text-muted-foreground">
-            Sign in to your Super Schema workspace.
+    <div className="flex flex-1 flex-col items-center justify-center bg-background px-6 py-12">
+      <div className="mb-8 flex items-center gap-2.5 lg:hidden">
+        <div className="flex size-8 items-center justify-center rounded-lg bg-primary/10">
+          <Database className="size-4 text-primary" />
+        </div>
+        <span className="text-base font-bold">Super Schema</span>
+      </div>
+
+      <div className="w-full max-w-sm space-y-7">
+        <div className="space-y-1.5">
+          <h1 className="text-2xl font-bold tracking-tight">Welcome back</h1>
+          <p className="text-sm text-muted-foreground">
+            Sign in to continue to your workspace.
           </p>
         </div>
 
-        <form onSubmit={handleSubmit} className="grid gap-3">
-          <div className="grid gap-1.5">
-            <Label htmlFor="email" className="text-xs">
-              Email
-            </Label>
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Email</Label>
             <Input
               id="email"
               type="email"
               autoComplete="email"
               required
+              placeholder="you@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               disabled={loading}
+              className="h-10"
             />
           </div>
-          <div className="grid gap-1.5">
-            <Label htmlFor="password" className="text-xs">
-              Password
-            </Label>
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <Label htmlFor="password">Password</Label>
+              <span className="cursor-not-allowed text-xs text-muted-foreground">Forgot password?</span>
+            </div>
             <Input
               id="password"
               type="password"
               autoComplete="current-password"
               required
+              placeholder="••••••••"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               disabled={loading}
+              className="h-10"
             />
           </div>
 
           {error && (
-            <p className="rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
               {error}
-            </p>
+            </div>
           )}
 
-          <Button type="submit" disabled={loading} className="mt-1">
-            {loading ? (
-              <Loader2 className="size-4 animate-spin" />
-            ) : (
-              "Sign in"
-            )}
+          <Button type="submit" disabled={loading} className="h-10 w-full">
+            {loading ? <Loader2 className="size-4 animate-spin" /> : "Sign in"}
           </Button>
         </form>
 
-        <p className="mt-4 text-center text-xs text-muted-foreground">
-          No account?{" "}
+        <p className="text-center text-xs text-muted-foreground">
+          By continuing you agree to our{" "}
           <Link
-            href="/sign-up"
-            className="font-medium text-violet-600 hover:underline dark:text-violet-400"
+            href="/terms"
+            className="font-medium text-foreground underline underline-offset-2 hover:opacity-80"
           >
-            Create one
+            Terms &amp; Conditions
+          </Link>{" "}
+          and{" "}
+          <Link
+            href="/privacy"
+            className="font-medium text-foreground underline underline-offset-2 hover:opacity-80"
+          >
+            Privacy Policy
+          </Link>
+          .
+        </p>
+
+        <p className="text-center text-sm text-muted-foreground">
+          Don&apos;t have an account?{" "}
+          <Link href="/sign-up" className="font-medium text-primary hover:underline underline-offset-4">
+            Create one free
           </Link>
         </p>
       </div>
@@ -111,8 +181,11 @@ function SignInForm() {
 
 export default function SignInPage() {
   return (
-    <Suspense fallback={null}>
-      <SignInForm />
-    </Suspense>
+    <div className="flex min-h-screen">
+      <BrandPanel />
+      <Suspense fallback={null}>
+        <SignInForm />
+      </Suspense>
+    </div>
   );
 }
