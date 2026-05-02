@@ -111,7 +111,21 @@ model Schema {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  project Project @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  versions SchemaVersion[]
 
   @@index([projectId])
+}
+
+model SchemaVersion {
+  id         String   @id @default(cuid())
+  schemaId   String
+  version    Int
+  schemaJson Json
+  createdAt  DateTime @default(now())
+
+  schema Schema @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+
+  @@unique([schemaId, version])
+  @@index([schemaId, createdAt])
 }

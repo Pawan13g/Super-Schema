@@ -11,6 +11,8 @@ const PUBLIC_PATHS = [
   "/api/sign-up",
   "/terms",
   "/privacy",
+  "/landing",
+  "/docs",
 ];
 
 const PUBLIC_REDIRECT_PATHS = ["/sign-in", "/sign-up"];
@@ -41,6 +43,10 @@ export default auth((req) => {
   const isLoggedIn = !!req.auth;
 
   if (!isLoggedIn && !isPublic) {
+    // Root path → show landing page; other protected routes → sign-in
+    if (pathname === "/") {
+      return NextResponse.redirect(new URL("/landing", req.url));
+    }
     const url = new URL("/sign-in", req.url);
     url.searchParams.set("callbackUrl", pathname);
     return NextResponse.redirect(url);

@@ -2,6 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { useSchema } from "@/lib/schema-store";
+import { lintSchema, summarizeIssues } from "@/lib/schema-lint";
 import { generateSql, type SqlDialect } from "@/lib/sql-generator";
 import { generateModels, type ModelTarget } from "@/lib/model-generator";
 import { highlightSql } from "@/lib/sql-highlight";
@@ -12,8 +13,10 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Loader } from "@/components/ui/loader";
-import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Upload } from "lucide-react";
+import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Upload, AlertTriangle, History } from "lucide-react";
 import { QueryPanel } from "./query-panel";
+import { ProblemsPanel } from "./problems-panel";
+import { VersionHistoryPanel } from "./version-history-panel";
 
 export function SqlPreview() {
   const { schema, replaceSchema } = useSchema();
@@ -49,6 +52,10 @@ export function SqlPreview() {
       toast.error(err instanceof Error ? err.message : "Failed to read file");
     }
   };
+
+  const lintIssues = useMemo(() => lintSchema(schema), [schema]);
+  const lintSummary = summarizeIssues(lintIssues);
+  const totalProblems = lintIssues.length;
 
   const sql = useMemo(() => generateSql(schema, dialect), [schema, dialect]);
   const models = useMemo(
@@ -143,6 +150,23 @@ export function SqlPreview() {
             <TabsTrigger value="import" className="text-[10px] px-2 h-5 gap-1">
               <FileUp className="size-3" />
               SQL Import
+            </TabsTrigger>
+            <TabsTrigger value="problems" className="text-[10px] px-2 h-5 gap-1">
+              <AlertTriangle className="size-3" />
+              Problems
+              {totalProblems > 0 && (
+                <span className={`ml-0.5 rounded-full px-1.5 py-px text-[9px] font-semibold leading-none ${
+                  lintSummary.error > 0
+                    ? "bg-red-500/15 text-red-600"
+                    : "bg-amber-500/15 text-amber-600"
+                }`}>
+                  {totalProblems}
+                </span>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="history" className="text-[10px] px-2 h-5 gap-1">
+              <History className="size-3" />
+              History
             </TabsTrigger>
           </TabsList>
 
@@ -343,6 +367,15 @@ export function SqlPreview() {
               </div>
             </div>
           </div>
+        </TabsContent>
+        {/* Problems tab */}
+        <TabsContent value="problems" className="flex-1 overflow-hidden">
+          <ProblemsPanel />
+        </TabsContent>
+
+        {/* Version History tab */}
+        <TabsContent value="history" className="flex-1 overflow-hidden">
+          <VersionHistoryPanel />
         </TabsContent>
       </Tabs>
     </div>

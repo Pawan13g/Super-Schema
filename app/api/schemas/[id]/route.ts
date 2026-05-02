@@ -98,10 +98,65 @@ export async function PATCH(
         );
       }
       const schema = await prisma.schema.findUnique({ where: { id } });
+
+      // Create a version snapshot on content changes
+      if (schema && parsed.data.schemaJson) {
+        await prisma.schemaVersion.upsert({
+          where: { schemaId_version: { schemaId: id, version: schema.version } },
+          create: {
+            schemaId: id,
+            version: schema.version,
+            schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
+          },
+          update: {
+            schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
+          },
+        });
+        // Keep only the last 50 versions per schema
+        const oldest = await prisma.schemaVersion.findMany({
+          where: { schemaId: id },
+          orderBy: { version: "desc" },
+          skip: 50,
+          select: { id: true },
+        });
+        if (oldest.length > 0) {
+          await prisma.schemaVersion.deleteMany({
+            where: { id: { in: oldest.map((v) => v.id) } },
+          });
+        }
+      }
+
       return Response.json({ schema });
     }
 
     const schema = await prisma.schema.update({ where: { id }, data });
+
+    // Create a version snapshot on content changes
+    if (parsed.data.schemaJson) {
+      await prisma.schemaVersion.upsert({
+        where: { schemaId_version: { schemaId: id, version: schema.version } },
+        create: {
+          schemaId: id,
+          version: schema.version,
+          schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
+        },
+        update: {
+          schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
+        },
+      });
+      const oldest = await prisma.schemaVersion.findMany({
+        where: { schemaId: id },
+        orderBy: { version: "desc" },
+        skip: 50,
+        select: { id: true },
+      });
+      if (oldest.length > 0) {
+        await prisma.schemaVersion.deleteMany({
+          where: { id: { in: oldest.map((v) => v.id) } },
+        });
+      }
+    }
+
     return Response.json({ schema });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Update failed";

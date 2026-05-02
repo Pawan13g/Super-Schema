@@ -100,13 +100,6 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
     return indicators;
   };
 
-  // Use the primary key (or first column) for table-level top/bottom handles.
-  // Lets the user draw a relation from / to the table without targeting a
-  // specific column row — relation uses the PK as the FK reference.
-  const pkCol =
-    table.columns.find((c) => c.constraints.includes("PRIMARY KEY")) ??
-    table.columns[0];
-
   return (
     <div
       className="group/node relative min-w-[220px] rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow-md"
@@ -116,42 +109,6 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
       }}
       onClick={() => onSelect(table.id)}
     >
-      {/* Table-level handles (top + bottom) — anchored to the PK column. */}
-      {pkCol && (
-        <>
-          <Handle
-            type="target"
-            position={Position.Top}
-            id={`${pkCol.id}-target-top`}
-            title="Drag relation to this table"
-            isConnectable
-            style={{
-              background: table.color,
-              color: table.color,
-              cursor: "crosshair",
-              width: 12,
-              height: 12,
-              top: -6,
-            }}
-          />
-          <Handle
-            type="source"
-            position={Position.Bottom}
-            id={`${pkCol.id}-source-bottom`}
-            title="Drag relation from this table"
-            isConnectable
-            style={{
-              background: table.color,
-              color: table.color,
-              cursor: "crosshair",
-              width: 12,
-              height: 12,
-              bottom: -6,
-            }}
-          />
-        </>
-      )}
-
       {/* Pastel header */}
       <div
         className="flex items-center gap-2 rounded-t-lg border-b px-3 py-2"
@@ -227,7 +184,7 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
           return (
             <div
               key={col.id}
-              className={`relative flex items-center justify-between gap-2 px-3 py-1.5 text-xs ${
+              className={`group/row relative flex items-center justify-between gap-2 px-3 py-1.5 text-xs ${
                 i > 0 ? "border-t border-border/60" : ""
               }`}
             >
@@ -237,14 +194,15 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 id={`${col.id}-target-left`}
                 title="Drag to / from here to make a relation"
                 isConnectable
+                className="absolute! -left-1.5! top-1/2! -translate-y-1/2! opacity-0! group-hover/row:opacity-100! transition-opacity"
                 style={{
                   background: table.color,
-                  color: table.color,
                   zIndex: 20,
                   cursor: "crosshair",
-                  width: 12,
-                  height: 12,
-                  left: -6,
+                  width: 10,
+                  height: 10,
+                  border: "2px solid white",
+                  borderRadius: "50%",
                 }}
               />
               <span
@@ -275,14 +233,15 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 id={`${col.id}-source-right`}
                 title="Drag to another column to create a relation"
                 isConnectable
+                className="absolute! -right-1.5! top-1/2! -translate-y-1/2! opacity-0! group-hover/row:opacity-100! transition-opacity"
                 style={{
                   background: table.color,
-                  color: table.color,
                   zIndex: 20,
                   cursor: "crosshair",
-                  width: 12,
-                  height: 12,
-                  right: -6,
+                  width: 10,
+                  height: 10,
+                  border: "2px solid white",
+                  borderRadius: "50%",
                 }}
               />
             </div>

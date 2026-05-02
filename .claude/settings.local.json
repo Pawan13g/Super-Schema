@@ -9,7 +9,8 @@
       "Bash(npx next *)",
       "Bash(curl -sI http://localhost:3000/sql-wasm-browser.wasm)",
       "Bash(echo \"EXIT=$?\")",
-      "Bash(echo \"TSC=$?\")"
+      "Bash(echo \"TSC=$?\")",
+      "Bash(source ~/.nvm/nvm.sh && nvm use 20 2>/dev/null; npx next build 2>&1 | grep -E \"landing|error|Error\" | head -10)"
     ]
   }
 }

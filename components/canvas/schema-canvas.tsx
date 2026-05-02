@@ -126,8 +126,8 @@ export function SchemaCanvas() {
     setConfirm({ kind: "delete-table", tableId: id });
   }, []);
 
-  // Auto-arrange tables into layered columns by FK direction.
-  // Roots (no incoming relation) on the left; orphans tucked into a final column.
+  // Sugiyama-style layered auto-layout: layer assignment → crossing
+  // reduction (barycenter) → position assignment with centering.
   const autoArrange = useCallback(() => {
     const tables = schema.tables;
     if (tables.length === 0) return;
@@ -135,63 +135,142 @@ export function SchemaCanvas() {
     const idSet = new Set(tables.map((t) => t.id));
     const incoming = new Map<string, Set<string>>();
     const outgoing = new Map<string, Set<string>>();
+    const neighbors = new Map<string, Set<string>>();
     tables.forEach((t) => {
       incoming.set(t.id, new Set());
       outgoing.set(t.id, new Set());
+      neighbors.set(t.id, new Set());
     });
     schema.relations.forEach((r) => {
       if (!idSet.has(r.sourceTable) || !idSet.has(r.targetTable)) return;
       if (r.sourceTable === r.targetTable) return;
       outgoing.get(r.sourceTable)!.add(r.targetTable);
       incoming.get(r.targetTable)!.add(r.sourceTable);
+      neighbors.get(r.sourceTable)!.add(r.targetTable);
+      neighbors.get(r.targetTable)!.add(r.sourceTable);
     });
 
-    const depth = new Map<string, number>();
+    // ── 1. Layer assignment via longest-path BFS ──
+    const layer = new Map<string, number>();
     const queue: string[] = [];
     tables.forEach((t) => {
       if ((incoming.get(t.id)?.size ?? 0) === 0) {
-        depth.set(t.id, 0);
+        layer.set(t.id, 0);
         queue.push(t.id);
       }
     });
-    // BFS; cycle-safe via visited check
     while (queue.length) {
       const id = queue.shift()!;
-      const d = depth.get(id) ?? 0;
+      const d = layer.get(id) ?? 0;
       outgoing.get(id)?.forEach((next) => {
-        const nd = depth.get(next);
+        const nd = layer.get(next);
         if (nd === undefined || nd < d + 1) {
-          depth.set(next, d + 1);
+          layer.set(next, d + 1);
           queue.push(next);
         }
       });
     }
-    // Tables in a cycle without a clear root — drop into the last column
-    let maxDepth = 0;
-    depth.forEach((d) => {
-      if (d > maxDepth) maxDepth = d;
-    });
-    const orphanCol = maxDepth + 1;
+
+    // Find connected components for isolated subgraphs
+    const visited = new Set<string>();
+    const components: string[][] = [];
+    const bfs = (start: string) => {
+      const comp: string[] = [];
+      const q = [start];
+      visited.add(start);
+      while (q.length) {
+        const id = q.shift()!;
+        comp.push(id);
+        neighbors.get(id)?.forEach((n) => {
+          if (!visited.has(n)) {
+            visited.add(n);
+            q.push(n);
+          }
+        });
+      }
+      return comp;
+    };
+    // Connected tables first
     tables.forEach((t) => {
-      if (!depth.has(t.id)) depth.set(t.id, orphanCol);
+      if (!visited.has(t.id) && (neighbors.get(t.id)?.size ?? 0) > 0) {
+        components.push(bfs(t.id));
+      }
+    });
+    // Orphan tables (no relations) — each in its own component
+    const orphans: string[] = [];
+    tables.forEach((t) => {
+      if (!visited.has(t.id)) orphans.push(t.id);
     });
 
-    const columns = new Map<number, string[]>();
+    // Assign layers to cycle nodes / orphans
+    let maxLayer = 0;
+    layer.forEach((d) => { if (d > maxLayer) maxLayer = d; });
+    // Cycle nodes that BFS never reached go into next layer
     tables.forEach((t) => {
-      const c = depth.get(t.id) ?? 0;
-      if (!columns.has(c)) columns.set(c, []);
-      columns.get(c)!.push(t.id);
+      if (!layer.has(t.id)) layer.set(t.id, maxLayer + 1);
     });
 
-    const X_GAP = 80;
-    const Y_GAP = 60;
-    const X_START = 80;
-    const Y_START = 80;
+    // ── 2. Collect layers ──
+    const layers = new Map<number, string[]>();
+    tables.forEach((t) => {
+      const l = layer.get(t.id) ?? 0;
+      if (!layers.has(l)) layers.set(l, []);
+      layers.get(l)!.push(t.id);
+    });
+
+    // ── 3. Crossing reduction: barycenter heuristic (2 passes) ──
+    const sortedLayerKeys = Array.from(layers.keys()).sort((a, b) => a - b);
+
+    // Helper: position-in-layer lookup for the previous/next layer
+    const posInLayer = (layerIds: string[]) => {
+      const m = new Map<string, number>();
+      layerIds.forEach((id, i) => m.set(id, i));
+      return m;
+    };
+
+    // Forward pass: order each layer by barycenter of parents
+    for (let li = 1; li < sortedLayerKeys.length; li++) {
+      const prevIds = layers.get(sortedLayerKeys[li - 1])!;
+      const currIds = layers.get(sortedLayerKeys[li])!;
+      const prevPos = posInLayer(prevIds);
+
+      const barycenters = new Map<string, number>();
+      currIds.forEach((id) => {
+        const parents = incoming.get(id) ?? new Set();
+        let sum = 0, count = 0;
+        parents.forEach((p) => {
+          const pos = prevPos.get(p);
+          if (pos !== undefined) { sum += pos; count++; }
+        });
+        barycenters.set(id, count > 0 ? sum / count : Infinity);
+      });
+      currIds.sort((a, b) => (barycenters.get(a) ?? Infinity) - (barycenters.get(b) ?? Infinity));
+      layers.set(sortedLayerKeys[li], currIds);
+    }
+
+    // Backward pass: refine by barycenter of children
+    for (let li = sortedLayerKeys.length - 2; li >= 0; li--) {
+      const nextIds = layers.get(sortedLayerKeys[li + 1])!;
+      const currIds = layers.get(sortedLayerKeys[li])!;
+      const nextPos = posInLayer(nextIds);
+
+      const barycenters = new Map<string, number>();
+      currIds.forEach((id) => {
+        const children = outgoing.get(id) ?? new Set();
+        let sum = 0, count = 0;
+        children.forEach((c) => {
+          const pos = nextPos.get(c);
+          if (pos !== undefined) { sum += pos; count++; }
+        });
+        barycenters.set(id, count > 0 ? sum / count : Infinity);
+      });
+      currIds.sort((a, b) => (barycenters.get(a) ?? Infinity) - (barycenters.get(b) ?? Infinity));
+      layers.set(sortedLayerKeys[li], currIds);
+    }
+
+    // ── 4. Measure nodes ──
     const FALLBACK_W = 240;
     const FALLBACK_H = (cols: number) => 60 + cols * 32;
-
-    // Use React Flow's measured dimensions when available — falls back to
-    // an estimate before nodes have rendered for the first time.
     const measureFor = (id: string, columnCount: number) => {
       const node = reactFlowInstanceRef.current?.getNode(id);
       const w = node?.measured?.width ?? FALLBACK_W;
@@ -199,25 +278,48 @@ export function SchemaCanvas() {
       return { w, h };
     };
 
-    // Per-column max width — keeps columns vertically aligned.
-    const columnWidths = new Map<number, number>();
-    columns.forEach((ids, col) => {
-      let maxW = FALLBACK_W;
+    // ── 5. Position assignment with centering ──
+    const X_GAP = 100;
+    const Y_GAP = 50;
+    const X_START = 80;
+    const Y_START = 80;
+
+    // Measure per-layer max width
+    const layerWidths = new Map<number, number>();
+    layers.forEach((ids, l) => {
+      let maxW = 0;
       ids.forEach((tid) => {
         const t = tables.find((x) => x.id === tid)!;
         const { w } = measureFor(tid, t.columns.length);
         if (w > maxW) maxW = w;
       });
-      columnWidths.set(col, maxW);
+      layerWidths.set(l, maxW);
     });
+
+    // Compute total height per layer for centering
+    const layerHeights = new Map<number, number>();
+    layers.forEach((ids, l) => {
+      let totalH = 0;
+      ids.forEach((tid) => {
+        const t = tables.find((x) => x.id === tid)!;
+        const { h } = measureFor(tid, t.columns.length);
+        totalH += h;
+      });
+      totalH += Math.max(0, ids.length - 1) * Y_GAP;
+      layerHeights.set(l, totalH);
+    });
+    const globalMaxH = Math.max(...Array.from(layerHeights.values()), 0);
 
     const positions: Record<string, { x: number; y: number }> = {};
     let xCursor = X_START;
-    const sortedColIndexes = Array.from(columns.keys()).sort((a, b) => a - b);
-    for (const col of sortedColIndexes) {
-      const ids = columns.get(col)!;
-      const colW = columnWidths.get(col) ?? FALLBACK_W;
-      let yCursor = Y_START;
+
+    for (const l of sortedLayerKeys) {
+      const ids = layers.get(l)!;
+      const colW = layerWidths.get(l) ?? FALLBACK_W;
+      const totalH = layerHeights.get(l) ?? 0;
+      // Center this layer's group vertically relative to tallest layer
+      let yCursor = Y_START + (globalMaxH - totalH) / 2;
+
       for (const tid of ids) {
         const t = tables.find((x) => x.id === tid)!;
         const { h } = measureFor(tid, t.columns.length);
@@ -227,10 +329,39 @@ export function SchemaCanvas() {
       xCursor += colW + X_GAP;
     }
 
+    // ── 6. Place orphan tables in a grid below the main graph ──
+    if (orphans.length > 0) {
+      const orphanCols = Math.max(1, Math.ceil(Math.sqrt(orphans.length)));
+      const orphanYStart = Y_START + globalMaxH + Y_GAP * 2;
+      let ox = X_START, oy = orphanYStart;
+      let rowMaxH = 0;
+      orphans.forEach((tid, i) => {
+        const t = tables.find((x) => x.id === tid)!;
+        const { w, h } = measureFor(tid, t.columns.length);
+        positions[tid] = { x: ox, y: oy };
+        if (h > rowMaxH) rowMaxH = h;
+        if ((i + 1) % orphanCols === 0) {
+          ox = X_START;
+          oy += rowMaxH + Y_GAP;
+          rowMaxH = 0;
+        } else {
+          ox += w + X_GAP;
+        }
+      });
+    }
+
     setTablePositions(positions);
 
+    // Wait for React to commit new positions + React Flow to measure, then
+    // zoom-to-fit. Double rAF ensures the layout paint has completed.
     requestAnimationFrame(() => {
-      reactFlowInstanceRef.current?.fitView({ padding: 0.15, duration: 400 });
+      requestAnimationFrame(() => {
+        reactFlowInstanceRef.current?.fitView({
+          padding: 0.2,
+          duration: 500,
+          includeHiddenNodes: false,
+        });
+      });
     });
     toast.success(
       `Arranged ${tables.length} table${tables.length === 1 ? "" : "s"}`
