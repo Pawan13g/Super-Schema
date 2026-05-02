@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   }
 
   const projects = await prisma.project.findMany({
-    where: { workspaceId },
+    where: { workspaceId, deletedAt: null },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
@@ -34,7 +34,7 @@ export async function GET(request: NextRequest) {
       workspaceId: true,
       createdAt: true,
       updatedAt: true,
-      _count: { select: { schemas: true } },
+      _count: { select: { schemas: { where: { deletedAt: null } } } },
     },
   });
 

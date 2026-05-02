@@ -102,18 +102,12 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const lastSavedSchemaRef = useRef<string>("");
   const skipNextAutosaveRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Token bumps on every save start AND every active-schema/project/workspace
-  // switch. A stale save resolution checks its token and bails instead of
-  // applying state to whatever schema is now active.
-  const saveTokenRef = useRef(0);
-  // Always-current active schema id, readable inside async closures.
+  // Always-current active schema id, readable inside async closures so a
+  // late-resolving save can detect it should drop its result.
   const activeSchemaIdRef = useRef<string | null>(null);
-  // Server-side schema version we last loaded. Sent as `expectedVersion` on
-  // PATCH so two tabs can detect concurrent edits.
-  const loadedVersionRef = useRef<number | null>(null);
-  // Promise of the currently-running save (for the active schema). Subsequent
-  // saves await it before starting so they read the post-save version and
-  // never double-send the same expectedVersion (which would 409).
+  // Promise of the currently-running save. New saves chain after it (set
+  // synchronously, before any await) so two near-simultaneous edits don't
+  // race and double-write.
   const saveInFlightRef = useRef<Promise<unknown> | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
@@ -145,16 +139,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`/api/schemas/${id}`);
       if (!res.ok) return false;
       const data = (await res.json()) as {
-        schema: { id: string; schemaJson: Schema; version?: number };
+        schema: { id: string; schemaJson: Schema };
       };
       skipNextAutosaveRef.current = true;
       lastSavedSchemaRef.current = JSON.stringify(data.schema.schemaJson);
-      loadedVersionRef.current = data.schema.version ?? null;
       replaceSchema(data.schema.schemaJson);
       setActiveSchemaId(id);
       activeSchemaIdRef.current = id;
-      // Any in-flight save is for the previous schema — invalidate it.
-      saveTokenRef.current += 1;
       return true;
     },
     [replaceSchema]
@@ -274,14 +265,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     };
   }, [refreshWorkspaces, refreshProjects, refreshSchemas, loadSchemaIntoCanvas]);
 
-  // Cancel pending saves when active schema changes
+  // Drop a queued autosave when the active schema changes. Any save already
+  // in flight checks `activeSchemaIdRef` after its fetch resolves and bails.
   const cancelPendingSave = () => {
     if (saveTimerRef.current) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    // Invalidate any save that's already in flight too.
-    saveTokenRef.current += 1;
   };
 
   const switchSchema = useCallback(
@@ -527,13 +517,9 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Tracks last-saved time so the UI can show "saved 3s ago".
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 
-  // Strictly serialized PATCH path. Each call enqueues itself onto the chain
-  // BEFORE awaiting prior in-flight, so two near-simultaneous calls don't
-  // both await the same root promise and then race past each other (which
-  // would 409 the second). The ref is updated synchronously to the new tail.
-  // On 409 we adopt the server's currentVersion and silently retry once,
-  // since most 409s in single-tab use are version-bookkeeping drift, not a
-  // genuine cross-tab conflict.
+  // PATCH the active schema. Each call enqueues itself behind the prior
+  // in-flight save (set synchronously before any await) so saves never
+  // overlap on the wire.
   const performSave = useCallback(
     (
       targetSchemaId: string,
@@ -542,68 +528,11 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     ): Promise<boolean> => {
       const prior = saveInFlightRef.current ?? Promise.resolve();
 
-      const sendOnce = async (
-        attempt: number
-      ): Promise<{ ok: boolean; conflict: boolean }> => {
-        const expectedVersion = loadedVersionRef.current;
-        const res = await fetch(`/api/schemas/${targetSchemaId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            schemaJson: payloadSchema,
-            ...(expectedVersion !== null ? { expectedVersion } : {}),
-          }),
-        });
-
-        if (activeSchemaIdRef.current !== targetSchemaId) {
-          return { ok: false, conflict: false };
-        }
-
-        if (res.status === 409) {
-          // Server tells us its current version — adopt it and retry once.
-          try {
-            const data = (await res.json()) as {
-              currentVersion?: number | null;
-            };
-            if (typeof data.currentVersion === "number") {
-              loadedVersionRef.current = data.currentVersion;
-            }
-          } catch {
-            /* fall through */
-          }
-          if (attempt === 0) {
-            return await sendOnce(1);
-          }
-          return { ok: false, conflict: true };
-        }
-
-        if (!res.ok) {
-          return { ok: false, conflict: false };
-        }
-
-        // Success — read the new version off the response.
-        try {
-          const data = (await res.json()) as {
-            schema?: { version?: number };
-          };
-          if (typeof data.schema?.version === "number") {
-            loadedVersionRef.current = data.schema.version;
-          } else if (loadedVersionRef.current !== null) {
-            loadedVersionRef.current += 1;
-          }
-        } catch {
-          if (loadedVersionRef.current !== null) {
-            loadedVersionRef.current += 1;
-          }
-        }
-        return { ok: true, conflict: false };
-      };
-
       const run: Promise<boolean> = (async () => {
         try {
           await prior;
         } catch {
-          /* prior save errored — proceed */
+          /* prior errored — proceed anyway */
         }
 
         if (activeSchemaIdRef.current !== targetSchemaId) return false;
@@ -614,40 +543,27 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           return true;
         }
 
-        const myToken = ++saveTokenRef.current;
         setSaveStatus("saving");
-
         try {
-          const result = await sendOnce(0);
+          const res = await fetch(`/api/schemas/${targetSchemaId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ schemaJson: payloadSchema }),
+          });
 
           if (activeSchemaIdRef.current !== targetSchemaId) return false;
 
-          if (result.conflict) {
-            // Genuine conflict (retry already failed). Reload server state.
+          if (!res.ok) {
             setSaveStatus("error");
-            if (opts.interactive) {
-              toast.error(
-                "This schema was edited in another tab. Reloading the latest version…"
-              );
-            }
-            await loadSchemaIntoCanvas(targetSchemaId);
+            if (opts.interactive) toast.error("Save failed");
             return false;
           }
 
-          if (result.ok) {
-            lastSavedSchemaRef.current = serialized;
-            setSaveStatus("saved");
-            setLastSavedAt(Date.now());
-            if (opts.interactive) toast.success("Saved");
-            setTimeout(() => {
-              if (myToken === saveTokenRef.current) setSaveStatus("idle");
-            }, 2500);
-            return true;
-          }
-
-          setSaveStatus("error");
-          if (opts.interactive) toast.error("Save failed");
-          return false;
+          lastSavedSchemaRef.current = serialized;
+          setSaveStatus("saved");
+          setLastSavedAt(Date.now());
+          if (opts.interactive) toast.success("Saved");
+          return true;
         } catch (err) {
           setSaveStatus("error");
           if (opts.interactive) {
@@ -662,8 +578,16 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       });
       return run;
     },
-    [loadSchemaIntoCanvas]
+    []
   );
+
+  // Drop the "saved" badge ~2.5s after the last successful save. Keeps the
+  // status component dumb (no internal timers).
+  useEffect(() => {
+    if (saveStatus !== "saved") return;
+    const t = setTimeout(() => setSaveStatus("idle"), 2500);
+    return () => clearTimeout(t);
+  }, [saveStatus]);
 
   // Debounced auto-save on schema change → save to active schema
   useEffect(() => {

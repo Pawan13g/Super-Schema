@@ -72,27 +72,27 @@ Bugs / risks (ranked roughly by severity)
   <!-- 17. Index advisor — Schema → Index advisor… (rule-based + Ask AI; adds indexes) -->
   <!-- 18. Public read-only schema links — Schema → Share read-only…; viewer at /share/<token> -->
 
-  19. More providers: Anthropic Claude (@langchain/anthropic), Ollama (local), Mistral. Trivial extension to current LlmCreds.
+  <!-- 19. More providers: Anthropic Claude (@langchain/anthropic), Ollama (local), Mistral. Trivial extension to current LlmCreds.
   20. Export DBML / GraphQL / OpenAPI — wire into existing model-generator scaffold.
-  21. Bulk export — zip with .sql, .json, schema.prisma, models.ts, er.png.
+  21. Bulk export — zip with .sql, .json, schema.prisma, models.ts, er.png. -->
 
   High value, high effort
-  22. Connect to a live DB — read existing schema from a Postgres/MySQL connection, import as a new schema. Massive onboarding boost.
+  <!-- 22. Connect to a live DB — read existing schema from a Postgres/MySQL connection, import as a new schema. Massive onboarding boost.
   23. Real-time collaboration — Yjs + WebSocket or Liveblocks. Canvas multiplayer.
-  24. Team workspaces — invite members, RBAC. Currently every workspace has a single ownerId.
+  24. Team workspaces — invite members, RBAC. Currently every workspace has a single ownerId. -->
   25. GitHub sync — push generated schema/models to a repo on save. Auth via GitHub App.
-  26. Schema review / approval flow — PR-style for schema changes (esp. for teams).
+  <!-- 26. Schema review / approval flow — PR-style for schema changes (esp. for teams).
   27. Mobile canvas mode — tap-to-select, full-screen sheets for editing. Current canvas is desktop-first.
-  28. Self-hosted local mode — run AI against Ollama with no key, fully offline.
+  28. Self-hosted local mode — run AI against Ollama with no key, fully offline. -->
 
-  UX polish (cheap wins)
+  <!-- UX polish (cheap wins)
   - ? to open shortcuts modal.
   - Cmd+K global command palette.
   - Trash bin (soft delete) for schemas/projects, 30-day recovery.
   - Active schema/project shown in browser tab title.
   - Toaster theme="system" — confirm sonner respects next-themes resolved theme.
   - Auto-save indicator with last-saved timestamp on hover.
-  - Empty-state illustrations on /projects and inside the canvas.
+  - Empty-state illustrations on /projects and inside the canvas. -->
 
   Want me to pick any of these and ship it? Best first picks IMO: auth-gate /api/mock-db (1-line security fix), API key validation on save (small UX win), undo/redo + linter
   (high impact, contained scope).

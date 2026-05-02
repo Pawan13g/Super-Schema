@@ -1,11 +1,7 @@
 import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDecryptedKey } from "@/lib/user-settings";
-import {
-  checkRateLimit,
-  clientKey,
-  rateLimitResponse,
-} from "@/lib/rate-limit";
+import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import {
   generateSchema,
   explainSchema,

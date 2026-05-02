@@ -24,7 +24,6 @@ import {
   Sun,
   Moon,
   Workflow,
-  Wrench,
   Zap,
 } from "lucide-react";
 import { useTheme } from "next-themes";
@@ -94,19 +93,30 @@ const NAV: NavGroup[] = [
     ],
   },
   {
-    title: "Auth",
+    title: "Account",
     items: [
-      { id: "auth", label: "Email & OAuth" },
-      { id: "auth-redirect", label: "Redirect URIs" },
-      { id: "auth-troubleshoot", label: "Troubleshooting" },
+      { id: "auth", label: "Sign in" },
+      { id: "settings", label: "Settings" },
+    ],
+  },
+  {
+    title: "Teams",
+    items: [
+      { id: "collab", label: "Real-time collaboration" },
+      { id: "reviews", label: "Schema reviews" },
+      { id: "trash", label: "Trash bin" },
+    ],
+  },
+  {
+    title: "Connect",
+    items: [
+      { id: "connect-db", label: "Live database import" },
     ],
   },
   {
     title: "Reference",
     items: [
-      { id: "settings", label: "Settings" },
       { id: "security", label: "Security & privacy" },
-      { id: "deployment", label: "Deployment" },
       { id: "faq", label: "FAQ", icon: HelpCircle },
     ],
   },
@@ -124,21 +134,21 @@ const QUICKSTART_CARDS = [
     id: "ai",
     title: "AI assistant",
     description:
-      "Bring your own key for Google, OpenAI, Claude, Mistral, Grok, OpenRouter, or AWS Bedrock and design schemas in plain English.",
+      "Bring your own key for Google, OpenAI, Claude, Mistral, Grok, OpenRouter, AWS Bedrock, or Ollama and design schemas in plain English.",
     icon: Sparkles,
   },
   {
-    id: "auth",
-    title: "Auth & OAuth",
+    id: "collab",
+    title: "Collaborate",
     description:
-      "Set up email + password, enable Google / GitHub / Microsoft sign-in, and whitelist the redirect URIs.",
+      "Live multiplayer canvas, PR-style reviews, and public read-only share links.",
     icon: KeyRound,
   },
   {
-    id: "deployment",
-    title: "Deploy",
+    id: "connect-db",
+    title: "Import live DB",
     description:
-      "Vercel, Docker, Compose, or self-hosted. Includes health check endpoint, hardening checklist, and migration commands.",
+      "Point at a running PostgreSQL or MySQL — pull the schema, edit visually, export anywhere.",
     icon: Workflow,
   },
 ];
@@ -633,14 +643,14 @@ export default function DocsPage() {
                     <ProviderRow name="OpenRouter" model="openai/gpt-4o-mini" auth="API key" />
                     <ProviderRow name="xAI Grok" model="grok-2-latest" auth="API key" />
                     <ProviderRow name="AWS Bedrock" model="anthropic.claude-3-5-sonnet-20240620-v1:0" auth="Access key + secret + region" />
+                    <ProviderRow name="Ollama (local)" model="llama3.2" auth="No key — runs locally" />
                   </tbody>
                 </table>
               </div>
               <p className="mt-3 text-xs text-muted-foreground">
-                OpenRouter and Grok ride on the OpenAI-compatible REST API
-                with custom <code>baseURL</code>s. Bedrock requires AWS
-                credentials with <code>bedrock:InvokeModel</code> permission
-                for the chosen foundation model.
+                Pick <b>Ollama</b> in Settings to run fully offline against a
+                local model — no key, no data leaves your machine. The other
+                providers route through their cloud APIs using your own key.
               </p>
             </Section>
 
@@ -671,14 +681,23 @@ export default function DocsPage() {
               </p>
             </Section>
 
-            <Section id="models" eyebrow="Codegen" title="ORM models" icon={Boxes}>
+            <Section id="models" eyebrow="Codegen" title="ORM & schema exports" icon={Boxes}>
               <p className="text-sm leading-relaxed">
-                The Models tab generates type-safe model files:
+                The Models tab generates ready-to-use output for several
+                downstream tools. Switch the format with the sub-tabs.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li><b>Prisma</b> — <code>schema.prisma</code> with field types, relations, and indexes.</li>
                 <li><b>Sequelize</b> — TypeScript model classes with associations.</li>
+                <li><b>DBML</b> — for dbdiagram.io and other DBML-aware tools.</li>
+                <li><b>GraphQL</b> — SDL types per table with required/optional fields and a CRUD-style <code>Query</code> stub.</li>
+                <li><b>OpenAPI 3.1</b> — JSON spec with components per table and CRUD paths.</li>
               </ul>
+              <p className="mt-3 text-sm">
+                Need everything at once? Use <b>File → Bulk export (.zip)</b>.
+                You get every dialect SQL, JSON, Prisma, Sequelize, DBML,
+                GraphQL, OpenAPI, and an ER PNG snapshot in one archive.
+              </p>
             </Section>
 
             <Section id="import-export" eyebrow="Round-trip" title="Import & export" icon={Download}>
@@ -708,108 +727,125 @@ export default function DocsPage() {
               </p>
             </Section>
 
-            <Section id="auth" eyebrow="Accounts" title="Email & OAuth" icon={KeyRound}>
+            <Section id="auth" eyebrow="Account" title="Signing in" icon={KeyRound}>
               <p className="text-sm leading-relaxed">
-                Email/password is always available. Optional OAuth via
-                Google, GitHub, and Microsoft. Each provider activates
-                only when its env vars are set; new OAuth users are
-                auto-seeded with a workspace, project, and schema on
-                first sign-in.
+                Sign in with email + password, Google, GitHub, or Microsoft.
+                Your first sign-in seeds a personal workspace, a default
+                project, and a starter schema so you can jump straight onto
+                the canvas.
               </p>
-              <h3 className="mt-4 text-base font-semibold">Required env vars</h3>
-              <CodeBlock>{`AUTH_SECRET=...               # 32+ random bytes (run: make auth-secret)
-NEXTAUTH_URL=https://your.host  # exact public origin, no trailing slash
-
-# Google — https://console.cloud.google.com/apis/credentials
-AUTH_GOOGLE_ID=...
-AUTH_GOOGLE_SECRET=...
-
-# GitHub — https://github.com/settings/developers
-AUTH_GITHUB_ID=...
-AUTH_GITHUB_SECRET=...
-
-# Microsoft Entra ID — https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps
-AUTH_MICROSOFT_ID=...
-AUTH_MICROSOFT_SECRET=...
-AUTH_MICROSOFT_TENANT=common  # or your tenant GUID`}</CodeBlock>
-            </Section>
-
-            <Section id="auth-redirect" eyebrow="Auth" title="OAuth redirect URIs" icon={Compass}>
-              <p className="text-sm leading-relaxed">
-                Visit{" "}
-                <Link href="/settings#connections" className="text-primary hover:underline">
-                  Settings → Connections
-                </Link>
-                {" "}to copy the live URLs derived from your origin. Pattern:
-              </p>
-              <CodeBlock>{`<NEXTAUTH_URL>/api/auth/callback/google
-<NEXTAUTH_URL>/api/auth/callback/github
-<NEXTAUTH_URL>/api/auth/callback/microsoft-entra-id`}</CodeBlock>
-              <h3 className="mt-4 text-base font-semibold">Per-provider quirks</h3>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                <li><b>Google</b>: also add the bare origin under "Authorized JavaScript origins".</li>
-                <li><b>GitHub</b>: set both "Homepage URL" and "Authorization callback URL".</li>
-                <li><b>Microsoft</b>: register a Web platform redirect URI. Tenant <code>common</code> = multi-tenant; use a tenant GUID for single-tenant apps.</li>
+              <ul className="mt-3 list-disc space-y-1 pl-5 text-sm">
+                <li>Multiple accounts? Each has its own isolated workspaces.</li>
+                <li>Email is your unique handle; OAuth signs you in to the same account if the email matches your existing one.</li>
+                <li>Forgot your password? Use the link on the sign-in page.</li>
               </ul>
             </Section>
 
-            <Section id="auth-troubleshoot" eyebrow="Auth" title="Troubleshooting" icon={Wrench}>
-              <DefList
-                items={[
-                  {
-                    term: "redirect_uri_mismatch",
-                    desc: "Hit /api/auth/debug to see the exact callbackUrl the server hands to the provider. Paste it byte-for-byte into the provider console.",
-                  },
-                  {
-                    term: "Login bounces back to /sign-in",
-                    desc: "Check AUTH_SECRET is set in env, and NEXTAUTH_URL matches the browser origin (no trailing slash, http vs https). Restart dev / redeploy after any env change.",
-                  },
-                  {
-                    term: "Can't reach database server",
-                    desc: "DATABASE_URL is malformed. Format: postgresql://user:pass@host:5432/dbname. Check /api/health to see the parsed dbHost.",
-                  },
-                ]}
-              />
-            </Section>
-
-            <Section id="settings" eyebrow="Reference" title="Settings" icon={Settings}>
+            <Section id="settings" eyebrow="Account" title="Settings" icon={Settings}>
               <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed">
-                <li><b>Account</b> — name, email (read-only), avatar URL.</li>
-                <li><b>AI</b> — provider, model override, encrypted API key, master enable/disable, manual test connection.</li>
-                <li><b>Appearance</b> — theme: light, dark, system.</li>
-                <li><b>Connections</b> — linked OAuth providers + live redirect URIs to whitelist.</li>
+                <li><b>Profile</b> — display name, avatar URL.</li>
+                <li><b>AI</b> — choose a provider, override the model, paste your API key, enable or pause AI features.</li>
+                <li><b>Appearance</b> — light / dark / system theme.</li>
+                <li><b>Connections</b> — see which OAuth providers are linked to your account.</li>
               </ul>
+            </Section>
+
+            <Section id="collab" eyebrow="Teams" title="Real-time collaboration" icon={Compass}>
+              <p className="text-sm leading-relaxed">
+                Click the <b>Collab</b> pill in the top-right header to flip
+                Live mode on. Anyone else viewing the same schema joins the
+                same room and edits sync instantly.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Avatar stack shows everyone in the room with a colored ring.</li>
+                <li>Sync is peer-to-peer over WebRTC — schema state never round-trips through our servers while collaborating.</li>
+                <li>Last-writer-wins on simultaneous edits to the same field.</li>
+                <li>State persists to your account on autosave so anyone joining later inherits the latest.</li>
+              </ul>
+            </Section>
+
+            <Section id="reviews" eyebrow="Teams" title="Schema reviews (PR-style)" icon={Compass}>
+              <p className="text-sm leading-relaxed">
+                Open <b>Schema → Schema reviews…</b> to propose canvas
+                changes for approval before they go live.
+              </p>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm">
+                <li>Edit on the canvas as usual.</li>
+                <li>Click <b>New review</b> and add a title + description. The dialog shows a diff vs. the saved schema.</li>
+                <li>A teammate opens the review, sees the same diff, and clicks <b>Approve + merge</b> or <b>Reject</b>.</li>
+                <li>Approval merges the proposed JSON into the live schema and bumps its version. Rejected reviews stay archived for the record.</li>
+              </ol>
+            </Section>
+
+            <Section id="trash" eyebrow="Teams" title="Trash bin" icon={ShieldCheck}>
+              <p className="text-sm leading-relaxed">
+                Deleting a project or schema doesn&apos;t wipe it immediately.
+                It moves to <b>File → Trash bin…</b> for 30 days, then auto-prunes.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Restore in one click. Schemas inside a trashed project need the project restored first.</li>
+                <li>Permanently delete from the trash if you want to free a name immediately.</li>
+                <li>The countdown next to each row tells you how long until purge.</li>
+              </ul>
+            </Section>
+
+            <Section id="connect-db" eyebrow="Connect" title="Live database import" icon={Database}>
+              <p className="text-sm leading-relaxed">
+                Pull the schema from a running database directly onto the
+                canvas. Open <b>File → Connect to live DB…</b>.
+              </p>
+              <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm">
+                <li>Pick PostgreSQL or MySQL.</li>
+                <li>Paste a connection string (<code>postgres://user:pass@host:5432/db</code>).</li>
+                <li>Click <b>Test connection</b> for a preview (table / relation / column counts).</li>
+                <li>Click <b>Import</b> — a new schema is added to your active project containing the introspected tables, FK relations, and indexes.</li>
+              </ol>
+              <p className="mt-3 text-xs text-muted-foreground">
+                Read-only: we only run <code>SELECT</code> against{" "}
+                <code>information_schema</code>. Connection strings are used
+                once and discarded; we never store them.
+              </p>
             </Section>
 
             <Section id="security" eyebrow="Reference" title="Security & privacy" icon={ShieldCheck}>
               <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed">
-                <li>API keys encrypted with AES-256-GCM. Only a masked preview (first 4 / last 4) ever returns to the client.</li>
-                <li>Passwords hashed with bcrypt (cost 10).</li>
-                <li>Mock query execution runs in an in-browser SQLite sandbox; <code>DROP</code> / <code>DELETE</code> / <code>TRUNCATE</code> rejected.</li>
-                <li>Sessions are JWT-based; the Prisma adapter persists OAuth accounts + user records.</li>
-                <li>Per-route rate limits on /api/ai (20/min/user), /api/sign-up (5/h/IP), /api/mock-db (30/min/user), /api/settings/validate-key (6/min/user).</li>
-                <li>Honeypot field on sign-up; OAuth account-linking-by-email disabled.</li>
-              </ul>
-            </Section>
-
-            <Section id="deployment" eyebrow="Reference" title="Deployment" icon={Workflow}>
-              <p className="text-sm leading-relaxed">
-                Three supported paths — all in <code>DEPLOY.md</code>:
-              </p>
-              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                <li><b>Vercel</b> — push the repo, set env vars, optionally chain <code>prisma migrate deploy</code> in the build command.</li>
-                <li><b>Docker</b> — multi-stage <code>Dockerfile</code> built from <code>node:20-alpine</code>; runs as non-root, exposes <code>/api/health</code>.</li>
-                <li><b>Compose</b> — <code>docker-compose.yml</code> bundles app + Postgres 16 with healthchecks and named volume.</li>
+                <li><b>Your AI key stays yours.</b> Encrypted at rest with AES-256-GCM, decrypted server-side per request, never returned to the browser. We don&apos;t log or retain provider responses.</li>
+                <li><b>Schemas are private by default.</b> Only you (and people in your workspace) can see them.</li>
+                <li><b>Read-only share links</b> are unguessable random tokens. Revoke any time from <b>Schema → Share read-only…</b>.</li>
+                <li><b>Real-time collaboration</b> syncs peer-to-peer over WebRTC. Schema state never round-trips through us while you collaborate.</li>
+                <li><b>Live DB connection strings</b> are used once for introspection then discarded. Not stored.</li>
+                <li><b>Mock query execution</b> runs entirely in your browser. <code>DROP</code> / <code>DELETE</code> / <code>TRUNCATE</code> are blocked.</li>
+                <li><b>Account deletion</b> — email support and we&apos;ll wipe your data within 7 days.</li>
               </ul>
             </Section>
 
             <Section id="faq" eyebrow="FAQ" title="Frequently asked questions" icon={HelpCircle}>
               <DefList
                 items={[
-                  { term: "Do you train on my schemas?", desc: "No. Schemas live in your own Postgres. AI calls go directly to your provider with your key." },
-                  { term: "Can I self-host?", desc: "Yes. Clone the repo, set env vars, run make setup, then make dev." },
-                  { term: "Which model should I use?", desc: "Default gemini-2.5-flash is fast + cheap. Use larger models for stronger reasoning on complex domains." },
-                  { term: "How do I delete my account?", desc: "Account deletion isn't self-serve yet. Email support to request removal." },
+                  {
+                    term: "Do you train on my schemas?",
+                    desc: "No. AI calls go straight from our server to your chosen provider using your key. We don't keep transcripts.",
+                  },
+                  {
+                    term: "Can I run AI without paying for a provider?",
+                    desc: "Yes — install Ollama locally, pick it as the provider in Settings, and you're set. No key required, nothing leaves your machine.",
+                  },
+                  {
+                    term: "Which model should I use?",
+                    desc: "Gemini 2.5 Flash is fast and cheap and handles most tasks. Bump up to a larger model for complex domains or long-form reasoning.",
+                  },
+                  {
+                    term: "What happens if I lose internet during real-time collaboration?",
+                    desc: "Edits queue locally and sync the next time you reconnect. Auto-save still runs against your saved schema independently.",
+                  },
+                  {
+                    term: "How do I cancel my plan?",
+                    desc: "Cancel any time from Settings → Billing. You keep access until the end of the period.",
+                  },
+                  {
+                    term: "How do I delete my account?",
+                    desc: "Email support@superschema.app. We'll remove your data within 7 days.",
+                  },
                 ]}
               />
             </Section>
@@ -945,10 +981,3 @@ function Capability({ title, desc }: { title: string; desc: string }) {
   );
 }
 
-function CodeBlock({ children }: { children: React.ReactNode }) {
-  return (
-    <pre className="mt-3 overflow-x-auto rounded-lg border bg-muted/40 p-3 text-xs leading-relaxed">
-      <code>{children}</code>
-    </pre>
-  );
-}

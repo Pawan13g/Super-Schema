@@ -29,7 +29,7 @@ export async function GET(
   if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
 
   const schemas = await prisma.schema.findMany({
-    where: { projectId: id },
+    where: { projectId: id, deletedAt: null },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,

@@ -89,33 +89,65 @@ model Workspace {
 }
 
 model Project {
-  id          String   @id @default(cuid())
+  id          String    @id @default(cuid())
   name        String
   description String?
   workspaceId String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  // Soft-delete: row stays for 30 days for recovery, then prune.
+  deletedAt   DateTime?
 
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   schemas   Schema[]
 
   @@index([workspaceId])
+  @@index([deletedAt])
 }
 
 model Schema {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   name       String
   projectId  String
   schemaJson Json
-  version    Int      @default(1)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  version    Int       @default(1)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  // Soft-delete: row stays for 30 days for recovery, then prune.
+  deletedAt  DateTime?
 
   project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   versions SchemaVersion[]
   shares   SchemaShare[]
+  reviews  SchemaReview[]
 
   @@index([projectId])
+  @@index([deletedAt])
+}
+
+model SchemaReview {
+  id           String    @id @default(cuid())
+  schemaId     String
+  // Author user id (snapshot — kept even if user is deleted).
+  authorId     String
+  authorName   String?
+  title        String
+  description  String?
+  // Schema version this review was opened against (base for the diff).
+  baseVersion  Int
+  // Proposed schema JSON. Merged into Schema.schemaJson on approval.
+  proposedJson Json
+  // "open" | "approved" | "rejected"
+  status       String    @default("open")
+  decidedAt    DateTime?
+  decidedById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  schema Schema @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+
+  @@index([schemaId, status])
+  @@index([schemaId, createdAt])
 }
 
 model SchemaShare {

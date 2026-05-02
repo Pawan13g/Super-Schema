@@ -25,7 +25,7 @@ export async function GET(
   }
 
   const schemas = await prisma.schema.findMany({
-    where: { projectId: id },
+    where: { projectId: id, deletedAt: null },
     orderBy: { updatedAt: "desc" },
     select: {
       id: true,
@@ -95,6 +95,17 @@ export async function DELETE(
   const owned = await getProjectIfOwned(id, session.user.id);
   if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.project.delete({ where: { id } });
+  // Soft-delete: cascade by also marking child schemas. Permanent deletion
+  // happens via the trash route.
+  await prisma.$transaction([
+    prisma.project.update({
+      where: { id },
+      data: { deletedAt: new Date() },
+    }),
+    prisma.schema.updateMany({
+      where: { projectId: id, deletedAt: null },
+      data: { deletedAt: new Date() },
+    }),
+  ]);
   return Response.json({ ok: true });
 }

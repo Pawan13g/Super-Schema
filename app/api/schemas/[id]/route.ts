@@ -13,10 +13,6 @@ const patchSchema = z.object({
       relations: z.array(z.unknown()),
     })
     .optional(),
-  // Optimistic-lock guard: client sends the version it last loaded; server
-  // updates only when versions match. Lets two concurrent tabs detect that
-  // their state is stale instead of silently overwriting each other.
-  expectedVersion: z.number().int().nonnegative().optional(),
 });
 
 export async function GET(
@@ -71,67 +67,14 @@ export async function PATCH(
     if (parsed.data.name !== undefined) data.name = parsed.data.name;
     if (parsed.data.schemaJson !== undefined) {
       data.schemaJson = parsed.data.schemaJson as Prisma.InputJsonValue;
-      // Bump version on any content change so optimistic-lock readers
-      // see that their snapshot is stale.
+      // Bump version on every content change so the version-history panel can
+      // index snapshots monotonically.
       data.version = { increment: 1 };
-    }
-
-    if (parsed.data.expectedVersion !== undefined) {
-      // Conditional update — succeeds only if the row's current version
-      // matches what the client thought it was editing.
-      const result = await prisma.schema.updateMany({
-        where: { id, version: parsed.data.expectedVersion },
-        data,
-      });
-      if (result.count === 0) {
-        const current = await prisma.schema.findUnique({
-          where: { id },
-          select: { version: true, updatedAt: true },
-        });
-        return Response.json(
-          {
-            error: "Schema was modified elsewhere. Reload to get the latest.",
-            code: "VERSION_CONFLICT",
-            currentVersion: current?.version ?? null,
-          },
-          { status: 409 }
-        );
-      }
-      const schema = await prisma.schema.findUnique({ where: { id } });
-
-      // Create a version snapshot on content changes
-      if (schema && parsed.data.schemaJson) {
-        await prisma.schemaVersion.upsert({
-          where: { schemaId_version: { schemaId: id, version: schema.version } },
-          create: {
-            schemaId: id,
-            version: schema.version,
-            schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
-          },
-          update: {
-            schemaJson: parsed.data.schemaJson as Prisma.InputJsonValue,
-          },
-        });
-        // Keep only the last 50 versions per schema
-        const oldest = await prisma.schemaVersion.findMany({
-          where: { schemaId: id },
-          orderBy: { version: "desc" },
-          skip: 50,
-          select: { id: true },
-        });
-        if (oldest.length > 0) {
-          await prisma.schemaVersion.deleteMany({
-            where: { id: { in: oldest.map((v) => v.id) } },
-          });
-        }
-      }
-
-      return Response.json({ schema });
     }
 
     const schema = await prisma.schema.update({ where: { id }, data });
 
-    // Create a version snapshot on content changes
+    // Snapshot every content change into SchemaVersion (capped at 50 per schema).
     if (parsed.data.schemaJson) {
       await prisma.schemaVersion.upsert({
         where: { schemaId_version: { schemaId: id, version: schema.version } },
@@ -177,6 +120,10 @@ export async function DELETE(
   const owned = await getSchemaIfOwned(id, session.user.id);
   if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
 
-  await prisma.schema.delete({ where: { id } });
+  // Soft-delete: row stays for 30 days, recoverable from trash.
+  await prisma.schema.update({
+    where: { id },
+    data: { deletedAt: new Date() },
+  });
   return Response.json({ ok: true });
 }

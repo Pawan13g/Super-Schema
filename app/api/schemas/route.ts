@@ -8,7 +8,13 @@ export async function GET() {
   }
 
   const schemas = await prisma.schema.findMany({
-    where: { project: { workspace: { ownerId: session.user.id } } },
+    where: {
+      deletedAt: null,
+      project: {
+        deletedAt: null,
+        workspace: { ownerId: session.user.id },
+      },
+    },
     orderBy: [{ updatedAt: "desc" }],
     select: {
       id: true,

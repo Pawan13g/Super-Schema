@@ -187,10 +187,16 @@ export function SchemaCanvas() {
         const data = {
           table,
           selected: table.id === selectedTableId,
-          onSelect: setSelectedTableId,
+          onSelect: (id: string) => {
+            setSelectedTableId(id);
+            // On mobile, single tap on a table opens the full-screen edit
+            // sheet — there's no sidebar visible to edit from.
+            if (isMobile) setConfigTableId(id);
+          },
           onRequestDelete: requestDeleteTable,
           onRename: updateTableName,
           onConfigure: (id: string) => setConfigTableId(id),
+          isMobile,
         };
         if (existing) {
           // Preserve RF-owned fields: position, measured, dragging, etc.
@@ -210,6 +216,7 @@ export function SchemaCanvas() {
     setSelectedTableId,
     requestDeleteTable,
     updateTableName,
+    isMobile,
   ]);
 
   useEffect(() => {
@@ -414,6 +421,14 @@ export function SchemaCanvas() {
       const targetCol = stripSuffix(connection.targetHandle);
       if (!sourceCol || !targetCol) return;
 
+      // Guard against a column being deleted between drag-start and drop.
+      // Without this we'd create a relation pointing at a phantom column.
+      const sourceTable = schema.tables.find((t) => t.id === connection.source);
+      const targetTable = schema.tables.find((t) => t.id === connection.target);
+      if (!sourceTable || !targetTable) return;
+      if (!sourceTable.columns.some((c) => c.id === sourceCol)) return;
+      if (!targetTable.columns.some((c) => c.id === targetCol)) return;
+
       setPendingConnection({
         sourceTableId: connection.source,
         sourceColumnId: sourceCol,
@@ -421,7 +436,7 @@ export function SchemaCanvas() {
         targetColumnId: targetCol,
       });
     },
-    []
+    [schema.tables]
   );
 
   const handleRelationTypePicked = useCallback(

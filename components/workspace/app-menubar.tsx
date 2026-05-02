@@ -28,6 +28,7 @@ import {
   FileText,
   FolderOpen,
   GitCompare,
+  GitPullRequest,
   Image as ImageIcon,
   LayoutDashboard,
   LayoutTemplate,
@@ -37,12 +38,14 @@ import {
   PanelBottom,
   PanelLeft,
   PanelRight,
+  Plug,
   Plus,
   Settings,
   Share2,
   Sparkles,
   Sun,
   Table2,
+  Trash,
   Trash2,
   BookOpen,
   Zap,
@@ -68,6 +71,9 @@ interface AppMenubarProps {
   onIndexAdvisor: () => void;
   onShareSchema: () => void;
   onBulkExport: () => void;
+  onConnectDb: () => void;
+  onOpenReviews: () => void;
+  onOpenTrash: () => void;
 }
 
 export function AppMenubar({
@@ -90,6 +96,9 @@ export function AppMenubar({
   onIndexAdvisor,
   onShareSchema,
   onBulkExport,
+  onConnectDb,
+  onOpenReviews,
+  onOpenTrash,
 }: AppMenubarProps) {
   const { theme, setTheme } = useTheme();
   const {
@@ -164,10 +173,18 @@ export function AppMenubar({
             <FileSpreadsheet />
             Import CSV as table…
           </MenubarItem>
+          <MenubarItem onClick={onConnectDb}>
+            <Plug />
+            Connect to live DB…
+          </MenubarItem>
           <MenubarSeparator />
           <MenubarItem render={<Link href="/projects" />}>
             <LayoutDashboard />
             Projects dashboard
+          </MenubarItem>
+          <MenubarItem onClick={onOpenTrash}>
+            <Trash />
+            Trash bin…
           </MenubarItem>
           <MenubarItem render={<Link href="/settings" />}>
             <Settings />
@@ -309,6 +326,10 @@ export function AppMenubar({
             Share read-only…
           </MenubarItem>
           <MenubarSeparator />
+          <MenubarItem onClick={onOpenReviews}>
+            <GitPullRequest />
+            Schema reviews…
+          </MenubarItem>
           <MenubarItem onClick={onCompareSchemas}>
             <GitCompare />
             Compare schemas…

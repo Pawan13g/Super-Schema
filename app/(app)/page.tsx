@@ -37,14 +37,19 @@ import { CsvImportDialog } from "@/components/workspace/csv-import-dialog";
 import { DocGenDialog } from "@/components/workspace/doc-gen-dialog";
 import { IndexAdvisorDialog } from "@/components/workspace/index-advisor-dialog";
 import { ShareDialog } from "@/components/workspace/share-dialog";
+import { ConnectDbDialog } from "@/components/workspace/connect-db-dialog";
+import { ReviewsDialog } from "@/components/workspace/reviews-dialog";
+import { TrashDialog } from "@/components/workspace/trash-dialog";
 import { SaveStatusBadge } from "@/components/workspace/save-status-badge";
+import { CollabToggle } from "@/components/workspace/collab-toggle";
+import { LocalModeBadge } from "@/components/workspace/local-mode-badge";
+import { CommandPalette } from "@/components/workspace/command-palette";
+import { ShortcutsOverlay } from "@/components/workspace/shortcuts-overlay";
+import { ActiveTabTitle } from "@/components/workspace/active-tab-title";
 import { Tip } from "@/components/ui/tip";
 import {
   PanelLeftClose,
   PanelLeft,
-  ChevronRight,
-  Database,
-  FolderOpen,
   FileText,
   Sparkles,
 } from "lucide-react";
@@ -85,16 +90,7 @@ function CanvasHeader({
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
 }) {
-  const {
-    workspaces,
-    activeWorkspaceId,
-    projects,
-    activeProjectId,
-    schemas,
-    activeSchemaId,
-  } = useWorkspace();
-  const workspace = workspaces.find((w) => w.id === activeWorkspaceId);
-  const project = projects.find((p) => p.id === activeProjectId);
+  const { schemas, activeSchemaId } = useWorkspace();
   const schema = schemas.find((s) => s.id === activeSchemaId);
 
   return (
@@ -269,6 +265,9 @@ export default function Home() {
   const [docGenOpen, setDocGenOpen] = useState(false);
   const [indexAdvisorOpen, setIndexAdvisorOpen] = useState(false);
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [connectDbOpen, setConnectDbOpen] = useState(false);
+  const [reviewsOpen, setReviewsOpen] = useState(false);
+  const [trashOpen, setTrashOpen] = useState(false);
 
   const activeSchema = schemas.find((s) => s.id === activeSchemaId);
 
@@ -359,6 +358,9 @@ export default function Home() {
           onDocGen={() => setDocGenOpen(true)}
           onIndexAdvisor={() => setIndexAdvisorOpen(true)}
           onShareSchema={() => setShareDialogOpen(true)}
+          onConnectDb={() => setConnectDbOpen(true)}
+          onOpenReviews={() => setReviewsOpen(true)}
+          onOpenTrash={() => setTrashOpen(true)}
           onBulkExport={async () => {
             const schemaName = activeSchema?.name?.trim() || "schema";
             const t = toast.loading("Building bulk export…");
@@ -377,6 +379,8 @@ export default function Home() {
           }}
         />
         <div className="ml-auto flex shrink-0 items-center gap-2">
+          <LocalModeBadge />
+          <CollabToggle />
           <SaveStatusBadge />
           <Tip label={aiPanelOpen ? "Close AI assistant" : "Open AI assistant"}>
             <button
@@ -624,6 +628,16 @@ export default function Home() {
       />
 
       <ShareDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} />
+
+      <ConnectDbDialog open={connectDbOpen} onOpenChange={setConnectDbOpen} />
+
+      <ReviewsDialog open={reviewsOpen} onOpenChange={setReviewsOpen} />
+
+      <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
+
+      <CommandPalette />
+      <ShortcutsOverlay />
+      <ActiveTabTitle />
     </div>
   );
 }

@@ -20,6 +20,7 @@ import type { Table } from "@/lib/types";
 import { CommentPopover } from "./comment-popover";
 import { useSchema } from "@/lib/schema-store";
 import { Tip } from "@/components/ui/tip";
+import { cn } from "@/lib/utils";
 
 type TableNodeData = {
   table: Table;
@@ -28,10 +29,11 @@ type TableNodeData = {
   onRequestDelete: (id: string) => void;
   onRename: (id: string, name: string) => void;
   onConfigure?: (id: string) => void;
+  isMobile?: boolean;
 };
 
 function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
-  const { table, selected, onSelect, onRequestDelete, onRename, onConfigure } = data;
+  const { table, selected, onSelect, onRequestDelete, onRename, onConfigure, isMobile } = data;
   const { updateTableComment, updateColumn } = useSchema();
   const tableComment = table.comment?.trim() ?? "";
   const [editing, setEditing] = useState(false);
@@ -179,7 +181,15 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
             {table.name}
           </span>
         )}
-        <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/node:opacity-100">
+        <div
+          className={cn(
+            "flex shrink-0 items-center gap-0.5 transition-opacity",
+            // On mobile (no hover), keep buttons visible so they're tappable.
+            isMobile
+              ? "opacity-100"
+              : "opacity-0 group-hover/node:opacity-100"
+          )}
+        >
           {onConfigure && (
             <Tip label="Configure table…">
               <button
