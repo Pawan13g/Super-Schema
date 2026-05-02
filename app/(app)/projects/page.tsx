@@ -340,10 +340,14 @@ export default function ProjectsDashboardPage() {
   );
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden bg-muted/20">
+    // h-screen locks the shell to the viewport so the sidebar always reaches
+    // the bottom edge — h-full was sometimes resolving to less than full
+    // viewport when body's min-h-full was the only height anchor, leaving a
+    // visible "void" below the sidebar.
+    <div className="flex h-screen w-full overflow-hidden bg-background">
       <AppSidebar />
 
-      <div className="relative flex flex-1 flex-col overflow-hidden">
+      <div className="relative flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {/* Top header — breadcrumb + action. Stays pinned because it sits
             outside the scrolling <main>. */}
         <header className="z-30 flex h-12 shrink-0 items-center gap-3 border-b bg-background px-5">

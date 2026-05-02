@@ -107,7 +107,7 @@ export function AppSidebar() {
   };
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col overflow-hidden border-r bg-sidebar">
+    <aside className="flex h-full w-60 shrink-0 flex-col overflow-hidden border-r bg-card">
       {/* Workspace switcher — pinned at top */}
       <div className="shrink-0 border-b p-3">
         <DropdownMenu>

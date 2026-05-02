@@ -205,10 +205,10 @@ export default function ProjectDetailPage() {
   };
 
   return (
-    <div className="flex h-full flex-1 overflow-hidden">
+    <div className="flex h-screen w-full overflow-hidden bg-background">
       <AppSidebar />
 
-      <div className="flex flex-1 flex-col overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {/* Top bar */}
         <header className="flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-6 backdrop-blur-sm">
           <nav className="flex items-center gap-1.5 text-sm text-muted-foreground">

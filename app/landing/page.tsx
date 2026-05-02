@@ -3,23 +3,14 @@ import {
   Database,
   Sparkles,
   Code2,
-  Table2,
-  ArrowRight,
   Braces,
   Play,
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
   Check,
   Keyboard,
   FileCode2,
   GitBranch,
-  MousePointerClick,
-  BrainCircuit,
-  ShieldCheck,
   Layers,
   LayoutGrid,
-  SearchCode,
   Command,
   CircleDot,
 } from "lucide-react";
@@ -164,7 +155,7 @@ function AppPreview() {
         <span className="text-cyan-400">order_id</span>{" "}
         <span className="text-amber-400">int</span>{" "}
         <span className="text-zinc-500">[ref: &gt; orders.id]</span>{" "}
-        <span className="text-zinc-600">// foreign key</span>
+        <span className="text-zinc-600">{"// foreign key"}</span>
       </div>
       <div>
         <span className="text-zinc-500">4</span>
@@ -178,7 +169,7 @@ function AppPreview() {
         <span className="text-cyan-400">quantity</span>{" "}
         <span className="text-amber-400">int</span>{" "}
         <span className="text-zinc-500">[default: 1]</span>{" "}
-        <span className="text-zinc-600">// default quantity</span>
+        <span className="text-zinc-600">{"// default quantity"}</span>
       </div>
       <div>
         <span className="text-zinc-500">6</span>
@@ -595,7 +586,7 @@ function BentoFeatures() {
                     <span className="text-zinc-500">
                       [ref: &gt; orders.id]
                     </span>{" "}
-                    <span className="text-zinc-600">// foreign key</span>
+                    <span className="text-zinc-600">{"// foreign key"}</span>
                   </div>
                   <div>
                     <span className="text-zinc-600">4</span>{"    "}
@@ -607,7 +598,7 @@ function BentoFeatures() {
                     <span className="text-cyan-400">quantity</span>{" "}
                     <span className="text-amber-400">int</span>{" "}
                     <span className="text-zinc-500">[default: 1]</span>{" "}
-                    <span className="text-zinc-600">// default quantity</span>
+                    <span className="text-zinc-600">{"// default quantity"}</span>
                   </div>
                   <div>
                     <span className="text-zinc-600">6</span>{"  "}

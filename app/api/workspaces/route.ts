@@ -44,7 +44,7 @@ export async function POST(request: NextRequest) {
       data: {
         ownerId: session.user.id,
         name: parsed.data.name,
-      } as any,
+      },
     });
 
     return Response.json({ workspace });

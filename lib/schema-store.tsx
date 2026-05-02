@@ -78,15 +78,20 @@ function normalizeTable(table: Partial<Table> & Pick<Table, "id" | "name" | "col
   };
 }
 
-function genId(prefix: string) {
-  // Use browser-native UUIDs when available to avoid ID collisions
-  // across page refreshes (which reset module-scoped counters).
-  if (typeof crypto !== "undefined" && typeof (crypto as any).randomUUID === "function") {
-    // remove dashes to keep IDs compact
-    return `${prefix}_${(crypto as any).randomUUID().replace(/-/g, "")}`;
+function genId(prefix: string): string {
+  // Use browser-native UUIDs when available to avoid ID collisions across
+  // page refreshes (which would reset any module-scoped counter).
+  const c =
+    typeof crypto !== "undefined"
+      ? (crypto as Crypto & { randomUUID?: () => string })
+      : null;
+  if (c?.randomUUID) {
+    return `${prefix}_${c.randomUUID().replace(/-/g, "")}`;
   }
-  // Fallback to a timestamp-based id when crypto.randomUUID isn't available
-  return `${prefix}_${Date.now().toString(36)}_${Math.floor(Math.random() * 10000)}`;
+  // Fallback when crypto.randomUUID isn't available (older browsers).
+  return `${prefix}_${Date.now().toString(36)}_${Math.floor(
+    Math.random() * 10000
+  )}`;
 }
 
 // Pick a position for a junction table that avoids overlapping existing

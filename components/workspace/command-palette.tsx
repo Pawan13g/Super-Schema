@@ -12,8 +12,6 @@ import { useSchema } from "@/lib/schema-store";
 import {
   Database,
   FileText,
-  FolderOpen,
-  KeyRound,
   Search,
   Settings,
   Table2,
@@ -74,7 +72,7 @@ export function CommandPalette() {
     // Tables in the active schema
     schema.tables.forEach((t) => {
       const projName =
-        projects.find((p) =>
+        projects.find(() =>
           schemas.find((s) => s.id === activeSchemaId)
         )?.name ?? "";
       list.push({

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { headers } from "next/headers";
 import { ReadOnlyCanvas } from "@/components/canvas/readonly-canvas";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Logo } from "@/components/brand/logo";
 import type { Schema } from "@/lib/types";
 import { Eye } from "lucide-react";
 
@@ -43,15 +44,7 @@ export default async function SharePage({
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-background">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b bg-card/60 px-3 backdrop-blur-sm">
         <Link href="/landing" className="flex items-center gap-2">
-          <div className="flex size-6 items-center justify-center rounded-md bg-primary/15">
-            <svg viewBox="0 0 24 24" fill="none" className="size-5" aria-hidden>
-              <rect x="2" y="10" width="2.5" height="11" rx="1" fill="#a78bfa" />
-              <rect x="6" y="6" width="2.5" height="15" rx="1" fill="#8b5cf6" />
-              <rect x="10" y="3" width="2.5" height="18" rx="1" fill="#7c3aed" />
-              <rect x="14" y="7" width="2.5" height="14" rx="1" fill="#8b5cf6" />
-              <rect x="18" y="11" width="2.5" height="10" rx="1" fill="#a78bfa" />
-            </svg>
-          </div>
+          <Logo size={24} />
           <span className="text-sm font-bold tracking-tight">Super Schema</span>
         </Link>
 

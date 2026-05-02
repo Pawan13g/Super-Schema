@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Logo } from "@/components/brand/logo";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useIsMobile, useIsTablet } from "@/lib/use-media-query";
 import { WorkspaceSwitcher } from "@/components/workspace/workspace-switcher";
@@ -62,20 +63,7 @@ import { toast } from "sonner";
 function BrandLogo() {
   return (
     <div className="flex items-center gap-2">
-      <div className="flex size-6 items-center justify-center rounded-md bg-primary/15">
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          className="size-5"
-          aria-hidden="true"
-        >
-          <rect x="2" y="10" width="2.5" height="11" rx="1" fill="#a78bfa" />
-          <rect x="6" y="6" width="2.5" height="15" rx="1" fill="#8b5cf6" />
-          <rect x="10" y="3" width="2.5" height="18" rx="1" fill="#7c3aed" />
-          <rect x="14" y="7" width="2.5" height="14" rx="1" fill="#8b5cf6" />
-          <rect x="18" y="11" width="2.5" height="10" rx="1" fill="#a78bfa" />
-        </svg>
-      </div>
+      <Logo size={24} />
       <span className="hidden text-sm font-bold tracking-tight sm:block">
         Super Schema
       </span>

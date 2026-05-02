@@ -5,6 +5,7 @@ import { useSession } from "next-auth/react";
 import { useTheme } from "next-themes";
 import Link from "next/link";
 import { toast } from "sonner";
+import { Logo } from "@/components/brand/logo";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,7 +23,6 @@ import {
   BookOpen,
   Check,
   Copy,
-  Database,
   ExternalLink,
   Eye,
   EyeOff,
@@ -69,7 +69,7 @@ const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: 
 ];
 
 export default function SettingsPage() {
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [profile, setProfile] = useState<ProfileData | null>(null);
   const [settings, setSettings] = useState<PublicSettings | null>(null);
   const [loadingInitial, setLoadingInitial] = useState(true);
@@ -146,6 +146,7 @@ export default function SettingsPage() {
           >
             <ArrowLeft className="size-4" />
           </Link>
+          <Logo size={20} className="size-5" />
           <span className="text-sm font-semibold">Super Schema</span>
         </div>
 

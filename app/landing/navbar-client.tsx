@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Database, Menu, X } from "lucide-react";
+import { Menu, X } from "lucide-react";
+import { Logo } from "@/components/brand/logo";
 
 const NAV_LINKS = [
   { label: "Features", href: "#features" },
@@ -18,9 +19,7 @@ export function Navbar() {
     <nav className="fixed top-0 z-50 w-full border-b border-white/[0.06] bg-[#08081a]/80 backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
         <Link href="/landing" className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-violet-600/20 ring-1 ring-violet-500/30">
-            <Database className="size-4 text-violet-400" />
-          </div>
+          <Logo size={32} className="size-8" />
           <span className="text-[15px] font-bold tracking-tight text-white">
             Super Schema
           </span>

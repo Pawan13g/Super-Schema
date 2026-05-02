@@ -2,8 +2,6 @@
 
 import * as React from "react";
 import {
-  Controller,
-  ControllerProps,
   FieldPath,
   FieldValues,
   FormProvider,
@@ -26,7 +24,7 @@ const FormFieldContext = React.createContext<FormFieldContextValue>(
 const FormField = React.forwardRef<
   HTMLDivElement,
   React.HTMLAttributes<HTMLDivElement> & {
-    name: FieldPath<any>;
+    name: FieldPath<FieldValues>;
   }
 >(({ name, className, ...props }, ref) => {
   return (
@@ -86,7 +84,7 @@ const FormLabel = React.forwardRef<
   React.ElementRef<"label">,
   React.LabelHTMLAttributes<HTMLLabelElement>
 >(({ className, ...props }, ref) => {
-  const { error, formItemId } = useFormField();
+  const { formItemId } = useFormField();
 
   return (
     <label ref={ref} className={className} htmlFor={formItemId} {...props} />

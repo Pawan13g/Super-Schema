@@ -28,6 +28,7 @@ import {
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useSession } from "next-auth/react";
+import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";
 
 type IconType = React.ComponentType<{ className?: string }>;
@@ -869,17 +870,7 @@ export default function DocsPage() {
 // ---- helpers --------------------------------------------------------------
 
 function BrandMark() {
-  return (
-    <div className="flex size-7 items-center justify-center rounded-lg bg-primary/15">
-      <svg viewBox="0 0 120 120" className="size-5" aria-hidden>
-        <rect x="10" y="50" width="12" height="55" rx="6" fill="#a78bfa" />
-        <rect x="30" y="30" width="12" height="75" rx="6" fill="#8b5cf6" />
-        <rect x="50" y="15" width="12" height="90" rx="6" fill="#7c3aed" />
-        <rect x="70" y="35" width="12" height="70" rx="6" fill="#8b5cf6" />
-        <rect x="90" y="55" width="12" height="50" rx="6" fill="#a78bfa" />
-      </svg>
-    </div>
-  );
+  return <Logo size={28} className="size-7" />;
 }
 
 function Section({

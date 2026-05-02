@@ -4,7 +4,6 @@ import { useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { toast } from "sonner";
 import { useSchema } from "@/lib/schema-store";
 import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { Loader } from "@/components/ui/loader";
 import {
   ArrowUp,
@@ -395,7 +394,7 @@ export function AiChat({ onClose }: { onClose: () => void }) {
             />
           )}
 
-          {messages.map((msg, idx) => {
+          {messages.map((msg) => {
             if (msg.role === "user") {
               const isEditing = editingId === msg.id;
               return (

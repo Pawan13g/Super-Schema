@@ -104,10 +104,12 @@ function ReviewsBody({ onClose }: { onClose: () => void }) {
   };
 
   useEffect(() => {
-    // setState calls happen inside async refresh().
-    /* eslint-disable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+    // setState calls happen inside async refresh(); reload on schema change
+    // is intentional and refresh's identity isn't a meaningful trigger.
+    /* eslint-disable react-hooks/set-state-in-effect */
     void refresh();
-    /* eslint-enable react-hooks/set-state-in-effect, react-hooks/exhaustive-deps */
+    /* eslint-enable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSchemaId]);
 
   const filtered = useMemo(() => {

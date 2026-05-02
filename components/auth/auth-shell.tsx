@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import Link from "next/link";
+import { Logo } from "@/components/brand/logo";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -80,7 +81,7 @@ function ImagePanel({
         href="/landing"
         className="relative z-10 inline-flex items-center gap-2.5"
       >
-        <BrandMark className="size-9" />
+        <Logo size={36} className="size-9" />
         <span className="text-base font-semibold tracking-tight">
           Super Schema
         </span>
@@ -115,23 +116,3 @@ function ImagePanel({
   );
 }
 
-// Brand mark — abstract butterfly silhouette evoking the screenshot logo.
-// Stroked, monochrome, scales cleanly from 16px to 64px.
-function BrandMark({ className }: { className?: string }) {
-  return (
-    <svg
-      viewBox="0 0 32 32"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      className={className}
-      aria-hidden
-    >
-      <path d="M16 6c-4 0-7 3-7 7 0 3 2 5 5 6-1 1-2 2-2 4 0 2 2 3 4 3s4-1 4-3c0-2-1-3-2-4 3-1 5-3 5-6 0-4-3-7-7-7z" />
-      <path d="M16 13c2 0 4 1 4 3" />
-      <path d="M16 13c-2 0-4 1-4 3" />
-    </svg>
-  );
-}

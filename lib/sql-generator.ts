@@ -79,11 +79,7 @@ function quoteStringLiteral(value: string): string {
   return `'${value.replace(/'/g, "''")}'`;
 }
 
-function generateColumnDef(
-  col: Column,
-  dialect: SqlDialect,
-  table: Table
-): string {
+function generateColumnDef(col: Column, dialect: SqlDialect): string {
   const q = (n: string) => quoteIdentifier(n, dialect);
   const parts: string[] = [q(col.name)];
 
@@ -223,7 +219,7 @@ function generateTableSql(
   const lines: string[] = [];
 
   for (const col of table.columns) {
-    lines.push(`  ${generateColumnDef(col, dialect, table)}`);
+    lines.push(`  ${generateColumnDef(col, dialect)}`);
   }
 
   const fks = generateForeignKeys(table, relations, allTables, dialect);
