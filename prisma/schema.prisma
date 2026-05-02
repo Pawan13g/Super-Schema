@@ -113,8 +113,23 @@ model Schema {
 
   project  Project         @relation(fields: [projectId], references: [id], onDelete: Cascade)
   versions SchemaVersion[]
+  shares   SchemaShare[]
 
   @@index([projectId])
+}
+
+model SchemaShare {
+  id        String    @id @default(cuid())
+  // URL-safe public token. Indexed for /share/<token> lookups.
+  token     String    @unique
+  schemaId  String
+  // Soft-revoke: keep the row for audit but mark it inactive.
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  schema Schema @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+
+  @@index([schemaId])
 }
 
 model SchemaVersion {

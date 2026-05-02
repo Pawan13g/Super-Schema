@@ -28,7 +28,7 @@ const SEQUELIZE_TOKENS = new Set([
   "hasOne", "hasMany", "belongsToMany", "define",
 ]);
 
-type Lang = "prisma" | "typescript";
+type Lang = "prisma" | "typescript" | "json" | "plaintext";
 
 export function highlightCode(code: string, lang: Lang): React.ReactNode[] {
   return code.split("\n").map((line, i) => {

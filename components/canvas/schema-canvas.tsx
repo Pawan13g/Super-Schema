@@ -26,6 +26,7 @@ import { useSchema } from "@/lib/schema-store";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useIsMobile } from "@/lib/use-media-query";
 import { isMod, isTypingTarget } from "@/lib/shortcuts";
+import { computeAutoLayout } from "@/lib/auto-layout";
 import type { Table } from "@/lib/types";
 import { TableNode } from "./table-node";
 import {
@@ -36,6 +37,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AddRelationDialog } from "./add-relation-dialog";
 import { RelationTypeDialog } from "./relation-type-dialog";
 import { Button } from "@/components/ui/button";
+import { Tip } from "@/components/ui/tip";
+import { TableConfigDialog } from "@/components/workspace/table-config-dialog";
+import { Loader } from "@/components/ui/loader";
 import {
   Pencil,
   Plus,
@@ -45,6 +49,7 @@ import {
   ArrowRightLeft,
   Eye,
   LayoutGrid,
+  Settings,
   Undo2,
   Redo2,
 } from "lucide-react";
@@ -85,7 +90,7 @@ export function SchemaCanvas() {
     canUndo,
     canRedo,
   } = useSchema();
-  const { saveNow } = useWorkspace();
+  const { saveNow, loading: workspaceLoading } = useWorkspace();
 
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
@@ -121,236 +126,39 @@ export function SchemaCanvas() {
     targetTableId: string;
     targetColumnId: string;
   } | null>(null);
+  const [configTableId, setConfigTableId] = useState<string | null>(null);
 
   const requestDeleteTable = useCallback((id: string) => {
     setConfirm({ kind: "delete-table", tableId: id });
   }, []);
 
-  // Sugiyama-style layered auto-layout: layer assignment → crossing
-  // reduction (barycenter) → position assignment with centering.
   const autoArrange = useCallback(() => {
     const tables = schema.tables;
     if (tables.length === 0) return;
 
-    const idSet = new Set(tables.map((t) => t.id));
-    const incoming = new Map<string, Set<string>>();
-    const outgoing = new Map<string, Set<string>>();
-    const neighbors = new Map<string, Set<string>>();
-    tables.forEach((t) => {
-      incoming.set(t.id, new Set());
-      outgoing.set(t.id, new Set());
-      neighbors.set(t.id, new Set());
-    });
-    schema.relations.forEach((r) => {
-      if (!idSet.has(r.sourceTable) || !idSet.has(r.targetTable)) return;
-      if (r.sourceTable === r.targetTable) return;
-      outgoing.get(r.sourceTable)!.add(r.targetTable);
-      incoming.get(r.targetTable)!.add(r.sourceTable);
-      neighbors.get(r.sourceTable)!.add(r.targetTable);
-      neighbors.get(r.targetTable)!.add(r.sourceTable);
+    const positions = computeAutoLayout(schema, {
+      measure: (id, cols) => {
+        const node = reactFlowInstanceRef.current?.getNode(id);
+        return {
+          width: node?.measured?.width ?? 240,
+          height: node?.measured?.height ?? 60 + Math.max(1, cols) * 30,
+        };
+      },
     });
 
-    // ── 1. Layer assignment via longest-path BFS ──
-    const layer = new Map<string, number>();
-    const queue: string[] = [];
-    tables.forEach((t) => {
-      if ((incoming.get(t.id)?.size ?? 0) === 0) {
-        layer.set(t.id, 0);
-        queue.push(t.id);
-      }
-    });
-    while (queue.length) {
-      const id = queue.shift()!;
-      const d = layer.get(id) ?? 0;
-      outgoing.get(id)?.forEach((next) => {
-        const nd = layer.get(next);
-        if (nd === undefined || nd < d + 1) {
-          layer.set(next, d + 1);
-          queue.push(next);
-        }
-      });
-    }
-
-    // Find connected components for isolated subgraphs
-    const visited = new Set<string>();
-    const components: string[][] = [];
-    const bfs = (start: string) => {
-      const comp: string[] = [];
-      const q = [start];
-      visited.add(start);
-      while (q.length) {
-        const id = q.shift()!;
-        comp.push(id);
-        neighbors.get(id)?.forEach((n) => {
-          if (!visited.has(n)) {
-            visited.add(n);
-            q.push(n);
-          }
-        });
-      }
-      return comp;
-    };
-    // Connected tables first
-    tables.forEach((t) => {
-      if (!visited.has(t.id) && (neighbors.get(t.id)?.size ?? 0) > 0) {
-        components.push(bfs(t.id));
-      }
-    });
-    // Orphan tables (no relations) — each in its own component
-    const orphans: string[] = [];
-    tables.forEach((t) => {
-      if (!visited.has(t.id)) orphans.push(t.id);
-    });
-
-    // Assign layers to cycle nodes / orphans
-    let maxLayer = 0;
-    layer.forEach((d) => { if (d > maxLayer) maxLayer = d; });
-    // Cycle nodes that BFS never reached go into next layer
-    tables.forEach((t) => {
-      if (!layer.has(t.id)) layer.set(t.id, maxLayer + 1);
-    });
-
-    // ── 2. Collect layers ──
-    const layers = new Map<number, string[]>();
-    tables.forEach((t) => {
-      const l = layer.get(t.id) ?? 0;
-      if (!layers.has(l)) layers.set(l, []);
-      layers.get(l)!.push(t.id);
-    });
-
-    // ── 3. Crossing reduction: barycenter heuristic (2 passes) ──
-    const sortedLayerKeys = Array.from(layers.keys()).sort((a, b) => a - b);
-
-    // Helper: position-in-layer lookup for the previous/next layer
-    const posInLayer = (layerIds: string[]) => {
-      const m = new Map<string, number>();
-      layerIds.forEach((id, i) => m.set(id, i));
-      return m;
-    };
-
-    // Forward pass: order each layer by barycenter of parents
-    for (let li = 1; li < sortedLayerKeys.length; li++) {
-      const prevIds = layers.get(sortedLayerKeys[li - 1])!;
-      const currIds = layers.get(sortedLayerKeys[li])!;
-      const prevPos = posInLayer(prevIds);
-
-      const barycenters = new Map<string, number>();
-      currIds.forEach((id) => {
-        const parents = incoming.get(id) ?? new Set();
-        let sum = 0, count = 0;
-        parents.forEach((p) => {
-          const pos = prevPos.get(p);
-          if (pos !== undefined) { sum += pos; count++; }
-        });
-        barycenters.set(id, count > 0 ? sum / count : Infinity);
-      });
-      currIds.sort((a, b) => (barycenters.get(a) ?? Infinity) - (barycenters.get(b) ?? Infinity));
-      layers.set(sortedLayerKeys[li], currIds);
-    }
-
-    // Backward pass: refine by barycenter of children
-    for (let li = sortedLayerKeys.length - 2; li >= 0; li--) {
-      const nextIds = layers.get(sortedLayerKeys[li + 1])!;
-      const currIds = layers.get(sortedLayerKeys[li])!;
-      const nextPos = posInLayer(nextIds);
-
-      const barycenters = new Map<string, number>();
-      currIds.forEach((id) => {
-        const children = outgoing.get(id) ?? new Set();
-        let sum = 0, count = 0;
-        children.forEach((c) => {
-          const pos = nextPos.get(c);
-          if (pos !== undefined) { sum += pos; count++; }
-        });
-        barycenters.set(id, count > 0 ? sum / count : Infinity);
-      });
-      currIds.sort((a, b) => (barycenters.get(a) ?? Infinity) - (barycenters.get(b) ?? Infinity));
-      layers.set(sortedLayerKeys[li], currIds);
-    }
-
-    // ── 4. Measure nodes ──
-    const FALLBACK_W = 240;
-    const FALLBACK_H = (cols: number) => 60 + cols * 32;
-    const measureFor = (id: string, columnCount: number) => {
-      const node = reactFlowInstanceRef.current?.getNode(id);
-      const w = node?.measured?.width ?? FALLBACK_W;
-      const h = node?.measured?.height ?? FALLBACK_H(columnCount);
-      return { w, h };
-    };
-
-    // ── 5. Position assignment with centering ──
-    const X_GAP = 100;
-    const Y_GAP = 50;
-    const X_START = 80;
-    const Y_START = 80;
-
-    // Measure per-layer max width
-    const layerWidths = new Map<number, number>();
-    layers.forEach((ids, l) => {
-      let maxW = 0;
-      ids.forEach((tid) => {
-        const t = tables.find((x) => x.id === tid)!;
-        const { w } = measureFor(tid, t.columns.length);
-        if (w > maxW) maxW = w;
-      });
-      layerWidths.set(l, maxW);
-    });
-
-    // Compute total height per layer for centering
-    const layerHeights = new Map<number, number>();
-    layers.forEach((ids, l) => {
-      let totalH = 0;
-      ids.forEach((tid) => {
-        const t = tables.find((x) => x.id === tid)!;
-        const { h } = measureFor(tid, t.columns.length);
-        totalH += h;
-      });
-      totalH += Math.max(0, ids.length - 1) * Y_GAP;
-      layerHeights.set(l, totalH);
-    });
-    const globalMaxH = Math.max(...Array.from(layerHeights.values()), 0);
-
-    const positions: Record<string, { x: number; y: number }> = {};
-    let xCursor = X_START;
-
-    for (const l of sortedLayerKeys) {
-      const ids = layers.get(l)!;
-      const colW = layerWidths.get(l) ?? FALLBACK_W;
-      const totalH = layerHeights.get(l) ?? 0;
-      // Center this layer's group vertically relative to tallest layer
-      let yCursor = Y_START + (globalMaxH - totalH) / 2;
-
-      for (const tid of ids) {
-        const t = tables.find((x) => x.id === tid)!;
-        const { h } = measureFor(tid, t.columns.length);
-        positions[tid] = { x: xCursor, y: yCursor };
-        yCursor += h + Y_GAP;
-      }
-      xCursor += colW + X_GAP;
-    }
-
-    // ── 6. Place orphan tables in a grid below the main graph ──
-    if (orphans.length > 0) {
-      const orphanCols = Math.max(1, Math.ceil(Math.sqrt(orphans.length)));
-      const orphanYStart = Y_START + globalMaxH + Y_GAP * 2;
-      let ox = X_START, oy = orphanYStart;
-      let rowMaxH = 0;
-      orphans.forEach((tid, i) => {
-        const t = tables.find((x) => x.id === tid)!;
-        const { w, h } = measureFor(tid, t.columns.length);
-        positions[tid] = { x: ox, y: oy };
-        if (h > rowMaxH) rowMaxH = h;
-        if ((i + 1) % orphanCols === 0) {
-          ox = X_START;
-          oy += rowMaxH + Y_GAP;
-          rowMaxH = 0;
-        } else {
-          ox += w + X_GAP;
-        }
-      });
-    }
-
+    // Push positions to BOTH the schema (so auto-save persists them) AND
+    // React Flow's node state directly. syncNodesFromSchema deliberately
+    // preserves RF-owned positions across schema updates (so user drags
+    // aren't clobbered mid-drag). That same preservation makes auto-arrange
+    // writes silently ignored — RF keeps the old position. Force-apply here.
     setTablePositions(positions);
+    setNodes((prev) =>
+      prev.map((n) =>
+        positions[n.id]
+          ? { ...n, position: positions[n.id], positionAbsolute: positions[n.id] }
+          : n
+      )
+    );
 
     // Wait for React to commit new positions + React Flow to measure, then
     // zoom-to-fit. Double rAF ensures the layout paint has completed.
@@ -366,7 +174,7 @@ export function SchemaCanvas() {
     toast.success(
       `Arranged ${tables.length} table${tables.length === 1 ? "" : "s"}`
     );
-  }, [schema.tables, schema.relations, setTablePositions]);
+  }, [schema, setTablePositions]);
 
   // Sync schema → React Flow nodes. RF owns measured dimensions / drag
   // positions; schema owns identity + persisted position. Skip sync while a
@@ -382,6 +190,7 @@ export function SchemaCanvas() {
           onSelect: setSelectedTableId,
           onRequestDelete: requestDeleteTable,
           onRename: updateTableName,
+          onConfigure: (id: string) => setConfigTableId(id),
         };
         if (existing) {
           // Preserve RF-owned fields: position, measured, dragging, etc.
@@ -521,6 +330,10 @@ export function SchemaCanvas() {
   const edges: Edge[] = schema.relations.map((rel) => {
     const sourceTable = schema.tables.find((t) => t.id === rel.sourceTable);
     const sourceColor = sourceTable?.color ?? "var(--color-muted-foreground)";
+    // Highlight any edge attached to the currently selected table.
+    const touchesSelected =
+      selectedTableId !== null &&
+      (rel.sourceTable === selectedTableId || rel.targetTable === selectedTableId);
     return {
       id: rel.id,
       source: rel.sourceTable,
@@ -542,13 +355,23 @@ export function SchemaCanvas() {
       },
       labelBgStyle: {
         fill: "var(--color-background)",
-        stroke: "var(--color-border)",
-        strokeWidth: 1,
+        stroke: touchesSelected ? sourceColor : "var(--color-border)",
+        strokeWidth: touchesSelected ? 1.5 : 1,
       },
       labelBgPadding: [6, 3] as [number, number],
       labelBgBorderRadius: 6,
       markerEnd: { type: MarkerType.ArrowClosed, color: sourceColor },
-      style: { stroke: sourceColor, strokeWidth: 1.75 },
+      // RF supports `selected` — bumps stroke + glows when user clicks the edge.
+      style: {
+        stroke: sourceColor,
+        strokeWidth: touchesSelected ? 3 : 1.75,
+        opacity: selectedTableId === null || touchesSelected ? 1 : 0.35,
+        filter: touchesSelected
+          ? `drop-shadow(0 0 6px ${sourceColor}66)`
+          : undefined,
+      },
+      // RF default selected style: bumps to 4px and uses a brighter stroke.
+      selectable: true,
     };
   });
 
@@ -695,6 +518,11 @@ export function SchemaCanvas() {
       const table = schema.tables.find((t) => t.id === menu.nodeId);
       if (!table) return [];
       return [
+        {
+          label: "Configure table…",
+          icon: <Settings className="size-3" />,
+          onClick: () => setConfigTableId(table.id),
+        },
         {
           label: "Rename table",
           icon: <Pencil className="size-3" />,
@@ -913,30 +741,33 @@ export function SchemaCanvas() {
           className="!opacity-60"
         />
         <Controls className="!rounded-lg !border !border-border !bg-card !shadow-sm">
-          <ControlButton
-            onClick={undo}
-            title="Undo (Ctrl+Z)"
-            aria-label="Undo"
-            disabled={!canUndo}
-          >
-            <Undo2 />
-          </ControlButton>
-          <ControlButton
-            onClick={redo}
-            title="Redo (Ctrl+Shift+Z)"
-            aria-label="Redo"
-            disabled={!canRedo}
-          >
-            <Redo2 />
-          </ControlButton>
-          <ControlButton
-            onClick={autoArrange}
-            title="Auto-arrange tables"
-            aria-label="Auto-arrange tables"
-            disabled={schema.tables.length === 0}
-          >
-            <LayoutGrid />
-          </ControlButton>
+          <Tip label="Undo (Ctrl+Z)" side="right">
+            <ControlButton
+              onClick={undo}
+              aria-label="Undo"
+              disabled={!canUndo}
+            >
+              <Undo2 />
+            </ControlButton>
+          </Tip>
+          <Tip label="Redo (Ctrl+Shift+Z)" side="right">
+            <ControlButton
+              onClick={redo}
+              aria-label="Redo"
+              disabled={!canRedo}
+            >
+              <Redo2 />
+            </ControlButton>
+          </Tip>
+          <Tip label="Auto-arrange tables" side="right">
+            <ControlButton
+              onClick={autoArrange}
+              aria-label="Auto-arrange tables"
+              disabled={schema.tables.length === 0}
+            >
+              <LayoutGrid />
+            </ControlButton>
+          </Tip>
         </Controls>
         {!isMobile && (
           <MiniMap
@@ -956,25 +787,39 @@ export function SchemaCanvas() {
         )}
       </ReactFlow>
 
+      {/* Bootstrap loader — covers the canvas until workspace + active schema
+          are loaded, so the user sees feedback instead of a blank pane. */}
+      {workspaceLoading && (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-2 rounded-lg border bg-card px-4 py-3 shadow-sm">
+            <Loader />
+            <p className="text-xs text-muted-foreground">Loading workspace…</p>
+          </div>
+        </div>
+      )}
+
       {/* Floating toolbar — top right */}
       <div className="pointer-events-none absolute right-3 top-3 z-5 flex gap-1.5">
-        <Button
-          size="sm"
-          onClick={() => {
-            setRelationDialogSource(undefined);
-            setRelationDialogOpen(true);
-          }}
-          disabled={schema.tables.length < 2}
-          className="pointer-events-auto h-7 gap-1 bg-violet-600 px-2.5 text-white shadow-sm hover:bg-violet-700 disabled:bg-muted disabled:text-muted-foreground"
-          title={
+        <Tip
+          label={
             schema.tables.length < 2
               ? "Add at least 2 tables first"
               : "Create a foreign-key relation"
           }
         >
-          <Link2 className="size-3" />
-          <span className="hidden text-xs font-medium sm:inline">Add Relation</span>
-        </Button>
+          <Button
+            size="sm"
+            onClick={() => {
+              setRelationDialogSource(undefined);
+              setRelationDialogOpen(true);
+            }}
+            disabled={schema.tables.length < 2}
+            className="pointer-events-auto h-7 gap-1 bg-violet-600 px-2.5 text-white shadow-sm hover:bg-violet-700 disabled:bg-muted disabled:text-muted-foreground"
+          >
+            <Link2 className="size-3" />
+            <span className="hidden text-xs font-medium sm:inline">Add Relation</span>
+          </Button>
+        </Tip>
       </div>
 
       {menu && (
@@ -1030,6 +875,13 @@ export function SchemaCanvas() {
         confirmLabel={confirmProps.confirmLabel}
         variant="destructive"
         onConfirm={confirmProps.onConfirm}
+      />
+
+      <TableConfigDialog
+        tableId={configTableId}
+        onOpenChange={(o) => {
+          if (!o) setConfigTableId(null);
+        }}
       />
     </div>
   );

@@ -13,6 +13,8 @@ import {
   generateQuery,
   optimizeQuery,
   explainQuery,
+  documentSchema,
+  adviseIndexes,
   type LlmCreds,
 } from "@/lib/langchain/ai";
 
@@ -51,7 +53,9 @@ export async function POST(request: NextRequest) {
         { status: 403 }
       );
     }
-    if (!settings.provider || !settings.apiKey) {
+    // Ollama runs locally without an API key; treat key as optional there.
+    const keyOptional = settings.provider === "ollama";
+    if (!settings.provider || (!settings.apiKey && !keyOptional)) {
       return Response.json(
         {
           error:
@@ -64,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     const creds: LlmCreds = {
       provider: settings.provider,
-      apiKey: settings.apiKey,
+      apiKey: settings.apiKey ?? "",
       apiSecret: settings.apiSecret,
       region: settings.region,
       model: settings.model,
@@ -111,6 +115,14 @@ export async function POST(request: NextRequest) {
       case "explain_query": {
         const explanation = await explainQuery(creds, payload.schema, payload.query);
         return wrap(explanation);
+      }
+      case "document_schema": {
+        const docs = await documentSchema(creds, payload.schema);
+        return wrap(docs);
+      }
+      case "advise_indexes": {
+        const suggestions = await adviseIndexes(creds, payload.schema);
+        return wrap(suggestions);
       }
       default:
         return Response.json(

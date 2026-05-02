@@ -61,14 +61,17 @@ Bugs / risks (ranked roughly by severity)
 
   Medium value, medium effort
   <!-- 10. Schema versioning — already in TASKS.md as deferred. Snapshots on each save, with diff view. -->
-  11. Compare schemas — pick two schemas, see add/drop/alter list.
-  12. Migration SQL generator — diff between two schemas → ALTER TABLE statements.
-  13. Schema templates library — one-click "E-commerce", "SaaS", "Blog", etc. Bundled JSON.
-  14. CSV → table inference — drop a CSV, app proposes schema (column types from sampling).
-  15. Comments on tables / columns — already partial (updateTableComment); expose in canvas hover card.
-  16. AI doc-gen — auto-fill column comments via current model.
-  17. Index advisor — AI suggests indexes based on FK columns + common query patterns.
-  18. Public read-only schema links — /share/<id>, view-only canvas. Big growth driver.
+  <!-- 11. Compare schemas — pick two schemas, see add/drop/alter list. (Schema → Compare schemas…) -->
+  <!-- 12. Migration SQL generator — diff between two schemas → ALTER TABLE statements. (Migration tab in compare dialog) -->
+
+  <!-- 13. Schema templates library — File → Templates library… (E-commerce, SaaS, Blog, Auth, Inventory) -->
+  <!-- 14. CSV → table inference — File → Import CSV as table… (drop or browse, types inferred from samples) -->
+  <!-- 15. Comments on tables / columns — hover-card on canvas via MessageSquare icon when comment exists -->
+
+  <!-- 16. AI doc-gen — Schema → AI doc-gen… (review + apply per table/column) -->
+  <!-- 17. Index advisor — Schema → Index advisor… (rule-based + Ask AI; adds indexes) -->
+  <!-- 18. Public read-only schema links — Schema → Share read-only…; viewer at /share/<token> -->
+
   19. More providers: Anthropic Claude (@langchain/anthropic), Ollama (local), Mistral. Trivial extension to current LlmCreds.
   20. Export DBML / GraphQL / OpenAPI — wire into existing model-generator scaffold.
   21. Bulk export — zip with .sql, .json, schema.prisma, models.ts, er.png.

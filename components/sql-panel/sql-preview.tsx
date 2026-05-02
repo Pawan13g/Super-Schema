@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
+import { useStoredState } from "@/lib/use-stored-state";
 import { useSchema } from "@/lib/schema-store";
 import { lintSchema, summarizeIssues } from "@/lib/schema-lint";
 import { generateSql, type SqlDialect } from "@/lib/sql-generator";
@@ -18,12 +19,37 @@ import { QueryPanel } from "./query-panel";
 import { ProblemsPanel } from "./problems-panel";
 import { VersionHistoryPanel } from "./version-history-panel";
 
+const VALID_TABS = ["sql", "models", "query", "import", "problems", "history"] as const;
+type SqlTab = (typeof VALID_TABS)[number];
+const isSqlTab = (v: unknown): v is SqlTab =>
+  typeof v === "string" && (VALID_TABS as readonly string[]).includes(v);
+const isDialect = (v: unknown): v is SqlDialect =>
+  v === "postgresql" || v === "mysql" || v === "sqlite";
+const isModelTarget = (v: unknown): v is ModelTarget =>
+  v === "prisma" ||
+  v === "sequelize" ||
+  v === "dbml" ||
+  v === "graphql" ||
+  v === "openapi";
+
 export function SqlPreview() {
   const { schema, replaceSchema } = useSchema();
-  const [dialect, setDialect] = useState<SqlDialect>("postgresql");
-  const [modelTarget, setModelTarget] = useState<ModelTarget>("prisma");
+  const [dialect, setDialect] = useStoredState<SqlDialect>(
+    "super-schema:sql-dialect",
+    "postgresql",
+    { validate: isDialect }
+  );
+  const [modelTarget, setModelTarget] = useStoredState<ModelTarget>(
+    "super-schema:sql-model-target",
+    "prisma",
+    { validate: isModelTarget }
+  );
   const [copied, setCopied] = useState(false);
-  const [activeTab, setActiveTab] = useState("sql");
+  const [activeTab, setActiveTab] = useStoredState<SqlTab>(
+    "super-schema:sql-active-tab",
+    "sql",
+    { validate: isSqlTab }
+  );
   const [importSql, setImportSql] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -95,9 +121,23 @@ export function SqlPreview() {
 
   const handleDownloadModels = () => {
     const filename =
-      modelTarget === "prisma" ? "schema.prisma" : "models.ts";
+      modelTarget === "prisma"
+        ? "schema.prisma"
+        : modelTarget === "sequelize"
+          ? "models.ts"
+          : modelTarget === "dbml"
+            ? "schema.dbml"
+            : modelTarget === "graphql"
+              ? "schema.graphql"
+              : "openapi.json";
     const mime =
-      modelTarget === "prisma" ? "text/plain" : "text/typescript";
+      modelTarget === "prisma"
+        ? "text/plain"
+        : modelTarget === "sequelize"
+          ? "text/typescript"
+          : modelTarget === "openapi"
+            ? "application/json"
+            : "text/plain";
     const blob = new Blob([models], { type: mime });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -131,7 +171,13 @@ export function SqlPreview() {
 
   return (
     <div className="flex h-full flex-col bg-card">
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col gap-0">
+      <Tabs
+        value={activeTab}
+        onValueChange={(v) => {
+          if (isSqlTab(v)) setActiveTab(v);
+        }}
+        className="flex h-full flex-col gap-0"
+      >
         {/* Header with tabs and controls */}
         <div className="flex items-center justify-between gap-2 overflow-x-auto border-b px-3 py-1">
           <TabsList className="h-6 shrink-0">
@@ -233,6 +279,15 @@ export function SqlPreview() {
                   <TabsTrigger value="sequelize" className="text-[10px] px-2 h-5">
                     Sequelize
                   </TabsTrigger>
+                  <TabsTrigger value="dbml" className="text-[10px] px-2 h-5">
+                    DBML
+                  </TabsTrigger>
+                  <TabsTrigger value="graphql" className="text-[10px] px-2 h-5">
+                    GraphQL
+                  </TabsTrigger>
+                  <TabsTrigger value="openapi" className="text-[10px] px-2 h-5">
+                    OpenAPI
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
 
@@ -276,7 +331,13 @@ export function SqlPreview() {
               <code>
                 {highlightCode(
                   models,
-                  modelTarget === "prisma" ? "prisma" : "typescript"
+                  modelTarget === "prisma"
+                    ? "prisma"
+                    : modelTarget === "sequelize"
+                      ? "typescript"
+                      : modelTarget === "openapi"
+                        ? "json"
+                        : "plaintext"
                 )}
               </code>
             </pre>

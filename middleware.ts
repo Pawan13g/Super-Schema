@@ -13,6 +13,7 @@ const PUBLIC_PATHS = [
   "/privacy",
   "/landing",
   "/docs",
+  "/share",
 ];
 
 const PUBLIC_REDIRECT_PATHS = ["/sign-in", "/sign-up"];
@@ -23,6 +24,7 @@ export default auth((req) => {
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/health") ||
+    pathname.startsWith("/api/share/") ||
     pathname.startsWith("/_next") ||
     pathname === "/favicon.ico" ||
     pathname === "/sw.js" ||

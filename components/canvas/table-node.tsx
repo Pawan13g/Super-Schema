@@ -12,8 +12,14 @@ import {
   Fingerprint,
   ArrowUp,
   Link2,
+  MessageSquare,
+  MessageSquarePlus,
+  Settings,
 } from "lucide-react";
 import type { Table } from "@/lib/types";
+import { CommentPopover } from "./comment-popover";
+import { useSchema } from "@/lib/schema-store";
+import { Tip } from "@/components/ui/tip";
 
 type TableNodeData = {
   table: Table;
@@ -21,10 +27,13 @@ type TableNodeData = {
   onSelect: (id: string) => void;
   onRequestDelete: (id: string) => void;
   onRename: (id: string, name: string) => void;
+  onConfigure?: (id: string) => void;
 };
 
 function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
-  const { table, selected, onSelect, onRequestDelete, onRename } = data;
+  const { table, selected, onSelect, onRequestDelete, onRename, onConfigure } = data;
+  const { updateTableComment, updateColumn } = useSchema();
+  const tableComment = table.comment?.trim() ?? "";
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(table.name);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -105,7 +114,10 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
       className="group/node relative min-w-[220px] rounded-lg border bg-card text-card-foreground shadow-sm transition-all hover:shadow-md"
       style={{
         borderColor: selected ? table.color : "var(--color-border)",
-        boxShadow: selected ? `0 0 0 2px ${table.color}33` : undefined,
+        // Stronger ring + drop-shadow glow when this table is the active one.
+        boxShadow: selected
+          ? `0 0 0 2px ${table.color}, 0 8px 24px ${table.color}33`
+          : undefined,
       }}
       onClick={() => onSelect(table.id)}
     >
@@ -118,6 +130,26 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
         }}
       >
         <Table2 className="size-3.5 shrink-0" style={{ color: table.color }} />
+        {!editing ? (
+          <CommentPopover
+            comment={tableComment}
+            onSave={(next) => updateTableComment(table.id, next)}
+            label={`Comment on ${table.name}`}
+            trigger={
+              tableComment ? (
+                <MessageSquare
+                  className="size-3 shrink-0 text-cyan-500 hover:text-cyan-600"
+                  aria-label="Table comment"
+                />
+              ) : (
+                <MessageSquarePlus
+                  className="size-3 shrink-0 text-muted-foreground/40 opacity-0 transition-opacity group-hover/node:opacity-100 hover:text-foreground"
+                  aria-label="Add table comment"
+                />
+              )
+            }
+          />
+        ) : null}
         {editing ? (
           <input
             ref={inputRef}
@@ -148,31 +180,46 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
           </span>
         )}
         <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/node:opacity-100">
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              if (editing) commitRename();
-              else beginEdit();
-            }}
-            title={editing ? "Save name" : "Rename table"}
-            className="rounded p-0.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
-          >
-            {editing ? (
-              <Check className="size-3" />
-            ) : (
-              <Pencil className="size-3" />
-            )}
-          </button>
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onRequestDelete(table.id);
-            }}
-            title="Delete table"
-            className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-          >
-            <X className="size-3" />
-          </button>
+          {onConfigure && (
+            <Tip label="Configure table…">
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onConfigure(table.id);
+                }}
+                className="rounded p-0.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+              >
+                <Settings className="size-3" />
+              </button>
+            </Tip>
+          )}
+          <Tip label={editing ? "Save name" : "Rename table (double-click)"}>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                if (editing) commitRename();
+                else beginEdit();
+              }}
+              className="rounded p-0.5 text-muted-foreground hover:bg-foreground/5 hover:text-foreground"
+            >
+              {editing ? (
+                <Check className="size-3" />
+              ) : (
+                <Pencil className="size-3" />
+              )}
+            </button>
+          </Tip>
+          <Tip label="Delete table">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestDelete(table.id);
+              }}
+              className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            >
+              <X className="size-3" />
+            </button>
+          </Tip>
         </div>
       </div>
 
@@ -209,17 +256,37 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
                 className={`flex items-center gap-1 truncate font-mono ${isPk ? "font-semibold text-foreground" : "text-foreground/90"}`}
               >
                 <span className="truncate">{col.name}</span>
+                <CommentPopover
+                  comment={col.comment ?? ""}
+                  onSave={(next) =>
+                    updateColumn(table.id, col.id, { comment: next })
+                  }
+                  label={`Comment on ${col.name}`}
+                  trigger={
+                    col.comment?.trim() ? (
+                      <MessageSquare
+                        className="size-2.5 shrink-0 text-cyan-500 hover:text-cyan-600"
+                        aria-label="Column comment"
+                      />
+                    ) : (
+                      <MessageSquarePlus
+                        className="size-2.5 shrink-0 text-muted-foreground/30 opacity-0 transition-opacity group-hover/row:opacity-100 hover:text-foreground"
+                        aria-label="Add column comment"
+                      />
+                    )
+                  }
+                />
                 {indicators.length > 0 && (
                   <span className="ml-0.5 flex items-center gap-1">
                     {indicators.map((item) => (
-                      <span
-                        key={item.key}
-                        title={item.label}
-                        aria-label={item.label}
-                        className={item.className}
-                      >
-                        {item.icon}
-                      </span>
+                      <Tip key={item.key} label={item.label}>
+                        <span
+                          aria-label={item.label}
+                          className={item.className}
+                        >
+                          {item.icon}
+                        </span>
+                      </Tip>
                     ))}
                   </span>
                 )}

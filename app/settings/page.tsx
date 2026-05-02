@@ -44,6 +44,7 @@ import {
   PROVIDER_KEY_LABEL,
   PROVIDER_SECRET_LABEL,
   PROVIDER_NEEDS_SECRET,
+  PROVIDER_KEY_OPTIONAL,
   type AiProvider,
   type PublicSettings,
 } from "@/lib/ai-providers";
@@ -485,6 +486,7 @@ function AiTab({
   const [validating, setValidating] = useState(false);
 
   const needsSecret = provider ? PROVIDER_NEEDS_SECRET[provider] : false;
+  const keyOptional = provider ? PROVIDER_KEY_OPTIONAL[provider] : false;
 
   const validateKey = async (opts: {
     apiKey?: string;
@@ -782,7 +784,7 @@ function AiTab({
             disabled={
               validating ||
               !provider ||
-              (!apiKey.trim() && !settings.hasApiKey) ||
+              (!keyOptional && !apiKey.trim() && !settings.hasApiKey) ||
               (needsSecret &&
                 !region.trim() &&
                 !settings.region)

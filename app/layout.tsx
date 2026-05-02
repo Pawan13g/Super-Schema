@@ -3,6 +3,8 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { ThemeProvider } from "@/components/theme-provider";
 import { AuthSessionProvider } from "@/components/providers/session-provider";
 import { PwaRegister } from "@/components/providers/pwa-register";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { AiStatusProvider } from "@/lib/ai-status-context";
 import { Toaster } from "sonner";
 import {
   APPLICATION_JSON_LD,
@@ -152,7 +154,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col overflow-x-hidden">
         <AuthSessionProvider>
           <ThemeProvider>
-            {children}
+            <TooltipProvider delay={300} closeDelay={50}>
+              <AiStatusProvider>{children}</AiStatusProvider>
+            </TooltipProvider>
             <PwaRegister />
             <Toaster
               richColors

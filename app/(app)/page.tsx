@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useWorkspace } from "@/lib/workspace-context";
@@ -30,6 +30,15 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { AddRelationDialog } from "@/components/canvas/add-relation-dialog";
+import { CompareSchemasDialog } from "@/components/workspace/compare-schemas-dialog";
+import { TemplatesDialog } from "@/components/workspace/templates-dialog";
+import { useAiStatus } from "@/lib/ai-status-context";
+import { CsvImportDialog } from "@/components/workspace/csv-import-dialog";
+import { DocGenDialog } from "@/components/workspace/doc-gen-dialog";
+import { IndexAdvisorDialog } from "@/components/workspace/index-advisor-dialog";
+import { ShareDialog } from "@/components/workspace/share-dialog";
+import { SaveStatusBadge } from "@/components/workspace/save-status-badge";
+import { Tip } from "@/components/ui/tip";
 import {
   PanelLeftClose,
   PanelLeft,
@@ -41,6 +50,9 @@ import {
 } from "lucide-react";
 import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
+import { bulkExport, downloadBlob } from "@/lib/bulk-export";
+import { useSchema } from "@/lib/schema-store";
+import { toast } from "sonner";
 
 function BrandLogo() {
   return (
@@ -87,19 +99,20 @@ function CanvasHeader({
 
   return (
     <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
-      <Button
-        variant="ghost"
-        size="icon"
-        onClick={onToggleSidebar}
-        title="Toggle sidebar"
-        className="size-7 shrink-0"
-      >
-        {sidebarCollapsed ? (
-          <PanelLeft className="size-4" />
-        ) : (
-          <PanelLeftClose className="size-4" />
-        )}
-      </Button>
+      <Tip label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={onToggleSidebar}
+          className="size-7 shrink-0"
+        >
+          {sidebarCollapsed ? (
+            <PanelLeft className="size-4" />
+          ) : (
+            <PanelLeftClose className="size-4" />
+          )}
+        </Button>
+      </Tip>
 
       <div className="hidden sm:contents">
         <WorkspaceSwitcher />
@@ -123,33 +136,109 @@ export default function Home() {
   const aiPanelRef = usePanelRef();
   const isMobile = useIsMobile();
   const isTablet = useIsTablet();
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const [sqlPanelCollapsed, setSqlPanelCollapsed] = useState(false);
-  const [aiPanelOpen, setAiPanelOpen] = useState(true);
+  // Read panel state from localStorage so the user's last layout sticks across
+  // reloads. Falls back to defaults on SSR / first visit.
+  const initialPanels = (() => {
+    if (typeof window === "undefined") {
+      return { sidebar: false, sql: false, ai: true };
+    }
+    try {
+      const raw = window.localStorage.getItem("super-schema:panels");
+      if (raw) {
+        const parsed = JSON.parse(raw) as {
+          sidebar?: boolean;
+          sql?: boolean;
+          ai?: boolean;
+        };
+        return {
+          sidebar: !!parsed.sidebar,
+          sql: !!parsed.sql,
+          ai: parsed.ai !== false,
+        };
+      }
+    } catch {
+      /* fall through */
+    }
+    return { sidebar: false, sql: false, ai: true };
+  })();
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(initialPanels.sidebar);
+  const [sqlPanelCollapsed, setSqlPanelCollapsed] = useState(initialPanels.sql);
+  const [aiPanelOpen, setAiPanelOpen] = useState(initialPanels.ai);
+
+  // Auto-close the AI side panel when AI isn't configured. Without a key the
+  // panel is dead weight, and the persisted "open" state shouldn't override
+  // that. Re-open is still gated on a configured provider.
+  const aiStatus = useAiStatus();
+  const aiAutoClosedRef = useRef(false);
+  useEffect(() => {
+    if (aiStatus.loading) return;
+    const aiReady = aiStatus.configured && aiStatus.enabled;
+    if (!aiReady && aiPanelOpen && !aiAutoClosedRef.current) {
+      aiAutoClosedRef.current = true;
+      setAiPanelOpen(false);
+    }
+  }, [aiStatus.loading, aiStatus.configured, aiStatus.enabled, aiPanelOpen]);
+
+  // Write panel state on change.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      "super-schema:panels",
+      JSON.stringify({
+        sidebar: sidebarCollapsed,
+        sql: sqlPanelCollapsed,
+        ai: aiPanelOpen,
+      })
+    );
+  }, [sidebarCollapsed, sqlPanelCollapsed, aiPanelOpen]);
 
   // Re-balance panels when the breakpoint flips (rotate phone, resize window).
   // ResizablePanel locks its initial size at mount, so we call resize/expand
-  // imperatively whenever the breakpoint changes.
+  // imperatively whenever the breakpoint changes. On the first run we honor
+  // the persisted localStorage state; on later breakpoint flips we apply the
+  // breakpoint default.
+  const firstPanelRunRef = useRef(true);
   useEffect(() => {
     const sidebar = sidebarRef.current;
     const sql = sqlPanelRef.current;
+    const isFirst = firstPanelRunRef.current;
+    firstPanelRunRef.current = false;
     if (isMobile) {
       sidebar?.collapse();
       sql?.collapse();
       setAiPanelOpen(false);
-    } else if (isTablet) {
+      return;
+    }
+    if (isTablet) {
       sidebar?.collapse();
       sql?.expand?.();
       sql?.resize?.(35);
       setAiPanelOpen(false);
+      return;
+    }
+    // Desktop. On first mount, restore persisted state. After that, restore
+    // a sane default when the breakpoint actually flips back to desktop.
+    if (isFirst) {
+      if (initialPanels.sidebar) sidebar?.collapse();
+      else {
+        sidebar?.expand?.();
+        sidebar?.resize?.(20);
+      }
+      if (initialPanels.sql) sql?.collapse();
+      else {
+        sql?.expand?.();
+        sql?.resize?.(35);
+      }
+      setAiPanelOpen(initialPanels.ai);
     } else {
-      // Desktop — restore the default 3-pane layout.
       sidebar?.expand?.();
       sidebar?.resize?.(20);
       sql?.expand?.();
       sql?.resize?.(35);
       setAiPanelOpen(true);
     }
+    // initialPanels is captured at first render and stable enough.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, isTablet, sidebarRef, sqlPanelRef]);
 
   const {
@@ -162,6 +251,7 @@ export default function Home() {
     createWorkspace,
     renameSchema,
   } = useWorkspace();
+  const { schema: canvasSchema } = useSchema();
 
   const [newSchemaOpen, setNewSchemaOpen] = useState(false);
   const [newSchemaName, setNewSchemaName] = useState("");
@@ -173,6 +263,12 @@ export default function Home() {
   const [renameSchemaOpen, setRenameSchemaOpen] = useState(false);
   const [renameSchemaDraft, setRenameSchemaDraft] = useState("");
   const [addRelationOpen, setAddRelationOpen] = useState(false);
+  const [compareSchemasOpen, setCompareSchemasOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [csvImportOpen, setCsvImportOpen] = useState(false);
+  const [docGenOpen, setDocGenOpen] = useState(false);
+  const [indexAdvisorOpen, setIndexAdvisorOpen] = useState(false);
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
 
   const activeSchema = schemas.find((s) => s.id === activeSchemaId);
 
@@ -257,24 +353,48 @@ export default function Home() {
           }}
           onAddRelation={() => setAddRelationOpen(true)}
           onExportPng={() => exportCanvasPng()}
+          onCompareSchemas={() => setCompareSchemasOpen(true)}
+          onOpenTemplates={() => setTemplatesOpen(true)}
+          onImportCsv={() => setCsvImportOpen(true)}
+          onDocGen={() => setDocGenOpen(true)}
+          onIndexAdvisor={() => setIndexAdvisorOpen(true)}
+          onShareSchema={() => setShareDialogOpen(true)}
+          onBulkExport={async () => {
+            const schemaName = activeSchema?.name?.trim() || "schema";
+            const t = toast.loading("Building bulk export…");
+            try {
+              const blob = await bulkExport(canvasSchema, {
+                baseName: schemaName,
+              });
+              downloadBlob(blob, `${schemaName}.zip`);
+              toast.success("Bulk export ready", { id: t });
+            } catch (err) {
+              toast.error(
+                err instanceof Error ? err.message : "Export failed",
+                { id: t }
+              );
+            }
+          }}
         />
         <div className="ml-auto flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setAiPanelOpen((v) => !v)}
-            aria-pressed={aiPanelOpen}
-            title={aiPanelOpen ? "Close AI assistant" : "Open AI assistant"}
-            className={`group inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
-              aiPanelOpen
-                ? "border-primary/40 bg-primary/10 text-primary"
-                : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
-            }`}
-          >
-            <Sparkles
-              className={`size-3.5 ${aiPanelOpen ? "text-primary" : "text-primary/80 group-hover:text-primary"}`}
-            />
-            <span className="hidden sm:inline">AI</span>
-          </button>
+          <SaveStatusBadge />
+          <Tip label={aiPanelOpen ? "Close AI assistant" : "Open AI assistant"}>
+            <button
+              type="button"
+              onClick={() => setAiPanelOpen((v) => !v)}
+              aria-pressed={aiPanelOpen}
+              className={`group inline-flex h-7 items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-all ${
+                aiPanelOpen
+                  ? "border-primary/40 bg-primary/10 text-primary"
+                  : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-primary/5 hover:text-primary"
+              }`}
+            >
+              <Sparkles
+                className={`size-3.5 ${aiPanelOpen ? "text-primary" : "text-primary/80 group-hover:text-primary"}`}
+              />
+              <span className="hidden sm:inline">AI</span>
+            </button>
+          </Tip>
           <UserMenu variant="compact" />
         </div>
       </header>
@@ -486,6 +606,24 @@ export default function Home() {
         open={addRelationOpen}
         onOpenChange={setAddRelationOpen}
       />
+
+      <CompareSchemasDialog
+        open={compareSchemasOpen}
+        onOpenChange={setCompareSchemasOpen}
+      />
+
+      <TemplatesDialog open={templatesOpen} onOpenChange={setTemplatesOpen} />
+
+      <CsvImportDialog open={csvImportOpen} onOpenChange={setCsvImportOpen} />
+
+      <DocGenDialog open={docGenOpen} onOpenChange={setDocGenOpen} />
+
+      <IndexAdvisorDialog
+        open={indexAdvisorOpen}
+        onOpenChange={setIndexAdvisorOpen}
+      />
+
+      <ShareDialog open={shareDialogOpen} onOpenChange={setShareDialogOpen} />
     </div>
   );
 }

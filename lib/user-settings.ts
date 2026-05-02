@@ -146,12 +146,12 @@ export async function getDecryptedKey(userId: string): Promise<{
     }
   }
   const provider = (s.aiProvider as AiProvider | null) ?? null;
-  // Bedrock needs all three (key id + secret + region). Other providers
-  // only need apiKey.
+  // Bedrock needs key id + secret + region. Ollama runs locally with no key.
+  // Everything else just needs apiKey.
   const isConfigured = !!(
     provider &&
-    apiKey &&
-    (provider !== "bedrock" || (apiSecret && s.region))
+    (provider === "ollama" ||
+      (apiKey && (provider !== "bedrock" || (apiSecret && s.region))))
   );
   return {
     provider,

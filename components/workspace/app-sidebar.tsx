@@ -107,9 +107,9 @@ export function AppSidebar() {
   };
 
   return (
-    <aside className="flex h-full w-60 shrink-0 flex-col border-r bg-sidebar">
-      {/* Workspace switcher */}
-      <div className="border-b p-3">
+    <aside className="flex h-full w-60 shrink-0 flex-col overflow-hidden border-r bg-sidebar">
+      {/* Workspace switcher — pinned at top */}
+      <div className="shrink-0 border-b p-3">
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -163,8 +163,8 @@ export function AppSidebar() {
         </DropdownMenu>
       </div>
 
-      {/* Nav */}
-      <nav className="flex-1 space-y-0.5 overflow-y-auto p-2">
+      {/* Nav — independently scrollable */}
+      <nav className="min-h-0 flex-1 space-y-0.5 overflow-y-auto p-2">
         {navLinks.map(({ href, label, icon: Icon, active }) => (
           <Link
             key={href}
@@ -267,8 +267,8 @@ export function AppSidebar() {
         )}
       </nav>
 
-      {/* User area */}
-      <div className="border-t p-2">
+      {/* User area — pinned at bottom */}
+      <div className="shrink-0 border-t p-2">
         <UserMenu variant="full" />
       </div>
 

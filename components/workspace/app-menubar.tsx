@@ -23,10 +23,14 @@ import {
   Check,
   Copy,
   ExternalLink,
+  FileArchive,
+  FileSpreadsheet,
   FileText,
   FolderOpen,
+  GitCompare,
   Image as ImageIcon,
   LayoutDashboard,
+  LayoutTemplate,
   Link2,
   Monitor,
   Moon,
@@ -35,11 +39,13 @@ import {
   PanelRight,
   Plus,
   Settings,
+  Share2,
   Sparkles,
   Sun,
   Table2,
   Trash2,
   BookOpen,
+  Zap,
 } from "lucide-react";
 
 interface AppMenubarProps {
@@ -55,6 +61,13 @@ interface AppMenubarProps {
   onRenameSchema: () => void;
   onAddRelation: () => void;
   onExportPng: () => void;
+  onCompareSchemas: () => void;
+  onOpenTemplates: () => void;
+  onImportCsv: () => void;
+  onDocGen: () => void;
+  onIndexAdvisor: () => void;
+  onShareSchema: () => void;
+  onBulkExport: () => void;
 }
 
 export function AppMenubar({
@@ -70,6 +83,13 @@ export function AppMenubar({
   onRenameSchema,
   onAddRelation,
   onExportPng,
+  onCompareSchemas,
+  onOpenTemplates,
+  onImportCsv,
+  onDocGen,
+  onIndexAdvisor,
+  onShareSchema,
+  onBulkExport,
 }: AppMenubarProps) {
   const { theme, setTheme } = useTheme();
   const {
@@ -136,6 +156,15 @@ export function AppMenubar({
             New workspace
           </MenubarItem>
           <MenubarSeparator />
+          <MenubarItem onClick={onOpenTemplates}>
+            <LayoutTemplate />
+            Templates library…
+          </MenubarItem>
+          <MenubarItem onClick={onImportCsv}>
+            <FileSpreadsheet />
+            Import CSV as table…
+          </MenubarItem>
+          <MenubarSeparator />
           <MenubarItem render={<Link href="/projects" />}>
             <LayoutDashboard />
             Projects dashboard
@@ -148,6 +177,10 @@ export function AppMenubar({
           <MenubarItem onClick={onExportPng}>
             <ImageIcon />
             Export canvas as PNG
+          </MenubarItem>
+          <MenubarItem onClick={onBulkExport}>
+            <FileArchive />
+            Bulk export (.zip)
           </MenubarItem>
         </MenubarContent>
       </MenubarMenu>
@@ -261,6 +294,24 @@ export function AppMenubar({
           <MenubarItem onClick={onNewSchema}>
             <Plus />
             New schema
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem onClick={onDocGen}>
+            <Sparkles />
+            AI doc-gen…
+          </MenubarItem>
+          <MenubarItem onClick={onIndexAdvisor}>
+            <Zap />
+            Index advisor…
+          </MenubarItem>
+          <MenubarItem onClick={onShareSchema}>
+            <Share2 />
+            Share read-only…
+          </MenubarItem>
+          <MenubarSeparator />
+          <MenubarItem onClick={onCompareSchemas}>
+            <GitCompare />
+            Compare schemas…
           </MenubarItem>
           {schemas.length > 0 ? (
             <>

@@ -12,9 +12,11 @@ import {
   generateQueryPrompt,
   optimizeQueryPrompt,
   explainQueryPrompt,
+  documentSchemaPrompt,
+  adviseIndexesPrompt,
 } from "./prompts";
 import type { AiProvider } from "@/lib/ai-providers";
-import { DEFAULT_MODELS } from "@/lib/ai-providers";
+import { DEFAULT_MODELS, OLLAMA_DEFAULT_BASE_URL } from "@/lib/ai-providers";
 
 export interface LlmCreds {
   provider: AiProvider;
@@ -81,6 +83,21 @@ function makeLLM(creds: LlmCreds): BaseChatModel {
         credentials: {
           accessKeyId: creds.apiKey,
           secretAccessKey: creds.apiSecret,
+        },
+      });
+    case "ollama":
+      // Ollama exposes an OpenAI-compatible endpoint. Reuse the OpenAI
+      // adapter with a custom baseURL. apiKey is unused but ChatOpenAI
+      // requires a non-empty value, so we send a sentinel.
+      return new ChatOpenAI({
+        model,
+        temperature: 0.2,
+        apiKey: "ollama",
+        configuration: {
+          baseURL:
+            creds.apiKey && creds.apiKey.startsWith("http")
+              ? creds.apiKey
+              : OLLAMA_DEFAULT_BASE_URL,
         },
       });
     case "google":
@@ -190,6 +207,61 @@ export async function optimizeQuery(
   return typeof result.content === "string"
     ? result.content
     : JSON.stringify(result.content);
+}
+
+// ─── Doc-gen ──────────────────────────────────────────────────────────────
+
+const docColumnSchema = z.object({
+  name: z.string().describe("Column name (must match input)"),
+  comment: z.string().describe("Short comment for the column (empty string if unknown)"),
+});
+
+const docTableSchema = z.object({
+  name: z.string().describe("Table name (must match input)"),
+  comment: z.string().describe("Short comment for the table (empty string if unknown)"),
+  columns: z.array(docColumnSchema).describe("Documented columns"),
+});
+
+const documentedSchemaZod = z.object({
+  tables: z.array(docTableSchema),
+});
+
+export type DocumentedSchema = z.infer<typeof documentedSchemaZod>;
+
+export async function documentSchema(
+  creds: LlmCreds,
+  schemaJson: string
+): Promise<DocumentedSchema> {
+  const llm = makeLLM(creds);
+  const structured = llm.withStructuredOutput(documentedSchemaZod);
+  const chain = documentSchemaPrompt.pipe(structured);
+  return await chain.invoke({ schema: schemaJson });
+}
+
+// ─── Index advisor ────────────────────────────────────────────────────────
+
+const indexSuggestionSchema = z.object({
+  tableName: z.string().describe("Target table name"),
+  columns: z.array(z.string()).describe("Column names in index order"),
+  unique: z.boolean().describe("Should this be a UNIQUE index?"),
+  reason: z.string().describe("Why this index helps (1 sentence)"),
+});
+
+const indexSuggestionsZod = z.object({
+  suggestions: z.array(indexSuggestionSchema),
+});
+
+export type IndexSuggestion = z.infer<typeof indexSuggestionSchema>;
+export type IndexSuggestions = z.infer<typeof indexSuggestionsZod>;
+
+export async function adviseIndexes(
+  creds: LlmCreds,
+  schemaJson: string
+): Promise<IndexSuggestions> {
+  const llm = makeLLM(creds);
+  const structured = llm.withStructuredOutput(indexSuggestionsZod);
+  const chain = adviseIndexesPrompt.pipe(structured);
+  return await chain.invoke({ schema: schemaJson });
 }
 
 export async function explainQuery(

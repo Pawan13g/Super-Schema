@@ -63,6 +63,20 @@ const NAV: NavGroup[] = [
     ],
   },
   {
+    title: "Workflow",
+    items: [
+      { id: "templates", label: "Templates library" },
+      { id: "csv-import", label: "CSV → table" },
+      { id: "doc-gen", label: "AI doc-gen" },
+      { id: "index-advisor", label: "Index advisor" },
+      { id: "compare", label: "Compare schemas" },
+      { id: "migration", label: "Migration SQL" },
+      { id: "share", label: "Read-only share links" },
+      { id: "comments", label: "Comments" },
+      { id: "auto-arrange", label: "Auto-arrange" },
+    ],
+  },
+  {
     title: "AI Assistant",
     items: [
       { id: "ai", label: "Bring your own key" },
@@ -447,6 +461,129 @@ export default function DocsPage() {
               <p className="mt-3 text-xs text-muted-foreground">
                 Click any issue to focus the offending table on the canvas.
               </p>
+            </Section>
+
+            <Section id="templates" eyebrow="Workflow" title="Templates library" icon={Layers}>
+              <p className="text-sm leading-relaxed">
+                Bundled starter schemas: <b>E-commerce</b>, <b>SaaS / Multi-tenant</b>,
+                <b> Blog / CMS</b>, <b>Auth (NextAuth-style)</b>, <b>Inventory</b>.
+              </p>
+              <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm">
+                <li>Open <b>File → Templates library…</b></li>
+                <li>Pick a template — preview shows tables, columns, comments.</li>
+                <li>Click <b>Load template</b>. Loading replaces the current canvas (confirmation prompt if not empty).</li>
+              </ol>
+            </Section>
+
+            <Section id="csv-import" eyebrow="Workflow" title="CSV → table" icon={FileText}>
+              <p className="text-sm leading-relaxed">
+                Drop a CSV; the app proposes a table by sampling the first 200
+                rows. Open <b>File → Import CSV as table…</b>.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Auto-detected delimiter (<code>,</code> / <code>;</code> / tab / <code>|</code>) and RFC 4180 quoting.</li>
+                <li>Type inference: <code>BOOLEAN</code>, <code>INT</code>/<code>BIGINT</code>, <code>DOUBLE</code>, <code>UUID</code>, <code>TIMESTAMP</code>, <code>DATE</code>, <code>TIME</code>, <code>VARCHAR</code>/<code>TEXT</code>.</li>
+                <li>Detects nullable + unique columns from the sample.</li>
+                <li>Override any column type or pick the primary-key column before adding.</li>
+                <li>Max file size: 10 MB.</li>
+              </ul>
+            </Section>
+
+            <Section id="doc-gen" eyebrow="AI" title="AI doc-gen" icon={Sparkles}>
+              <p className="text-sm leading-relaxed">
+                Auto-generates table and column comments using your configured
+                AI provider. Open <b>Schema → AI doc-gen…</b>.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Per-table and per-column suggestions with checkboxes — apply only what you want.</li>
+                <li><b>Overwrite existing</b> toggle preserves your current comments by default.</li>
+                <li>Comments are short, plain-English (under 100 chars), focused on <i>why</i> rather than restating the name.</li>
+                <li>Requires an AI key — see <a href="#ai" className="text-primary hover:underline">Bring your own key</a>.</li>
+              </ul>
+            </Section>
+
+            <Section id="index-advisor" eyebrow="Performance" title="Index advisor" icon={Zap}>
+              <p className="text-sm leading-relaxed">
+                Suggests indexes for join and lookup performance. Open{" "}
+                <b>Schema → Index advisor…</b>.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li><b>Rule-based candidates</b> (always on): every FK source column, common lookup names (<code>email</code>, <code>slug</code>, <code>status</code>…), timestamp columns.</li>
+                <li><b>Ask AI</b> button augments with deeper, ranked suggestions including compound indexes.</li>
+                <li>Skips columns already covered by a PRIMARY KEY, UNIQUE constraint, or existing index.</li>
+                <li>Pick which to apply — adds them to the schema with sensible names.</li>
+              </ul>
+            </Section>
+
+            <Section id="compare" eyebrow="Workflow" title="Compare schemas" icon={Compass}>
+              <p className="text-sm leading-relaxed">
+                Diff two schemas across any of your projects. Open{" "}
+                <b>Schema → Compare schemas…</b>.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Pick a <b>From (old)</b> and <b>To (new)</b> schema; swap with the arrow button.</li>
+                <li><b>Changes</b> tab lists added / removed / modified tables, columns, and relations.</li>
+                <li><b>Migration SQL</b> tab generates the corresponding ALTER statements (see below).</li>
+              </ul>
+            </Section>
+
+            <Section id="migration" eyebrow="Workflow" title="Migration SQL generator" icon={Database}>
+              <p className="text-sm leading-relaxed">
+                The compare dialog&apos;s second tab outputs migration SQL for
+                PostgreSQL, MySQL, or SQLite.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li><code>CREATE TABLE</code> for added tables (with FK constraints inline).</li>
+                <li><code>DROP TABLE … CASCADE</code> for removed tables.</li>
+                <li>
+                  <code>ALTER TABLE … ADD / DROP / MODIFY COLUMN</code>,{" "}
+                  <code>ALTER COLUMN TYPE</code>, <code>SET / DROP NOT NULL</code>, default changes.
+                </li>
+                <li>FK add/drop on existing tables, with dialect-correct syntax.</li>
+                <li>Inline warnings when a change can lose data or fail (e.g. NOT NULL on an existing table).</li>
+                <li>SQLite limitations are flagged as comments where ALTER isn&apos;t supported.</li>
+              </ul>
+            </Section>
+
+            <Section id="share" eyebrow="Collaboration" title="Read-only share links" icon={KeyRound}>
+              <p className="text-sm leading-relaxed">
+                Generate a public URL anyone can view — no sign-in required.
+                Open <b>Schema → Share read-only…</b>.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>One active link per schema; reusing the action returns the existing token.</li>
+                <li>Viewers see the canvas with all tables, relations, and comments — but cannot edit, save, or run queries.</li>
+                <li><b>Revoke link</b> soft-disables it instantly.</li>
+                <li>Pages are marked <code>noindex</code> so search engines don&apos;t crawl them.</li>
+              </ul>
+            </Section>
+
+            <Section id="comments" eyebrow="Documentation" title="Comments on tables & columns" icon={FileText}>
+              <p className="text-sm leading-relaxed">
+                Comments surface as hover popovers on the canvas. A filled cyan
+                speech-bubble means a comment exists; hover an empty row to see
+                a faded &quot;add comment&quot; affordance.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Click the bubble → inline-editable popover.</li>
+                <li>Auto-saves on blur, <Kbd>⌘</Kbd>+<Kbd>↵</Kbd>, or <i>Done</i>. <Kbd>Esc</Kbd> discards.</li>
+                <li>Trash icon clears the comment.</li>
+                <li>PostgreSQL exports comments as <code>COMMENT ON</code> statements; MySQL as inline <code>COMMENT</code> clauses.</li>
+              </ul>
+            </Section>
+
+            <Section id="auto-arrange" eyebrow="Canvas" title="Auto-arrange" icon={Workflow}>
+              <p className="text-sm leading-relaxed">
+                The bottom-left auto-arrange button uses a Sugiyama-style
+                layered layout with virtual-node insertion so edges spanning
+                multiple layers don&apos;t cross through other tables.
+              </p>
+              <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
+                <li>Splits the schema into connected components; orphans grid below.</li>
+                <li>Reverses back-edges to flatten cycles into a left-to-right DAG.</li>
+                <li>Multi-pass barycentric crossing reduction.</li>
+                <li>Centroid pull + collision sweep so siblings line up with their parent rows.</li>
+              </ul>
             </Section>
 
             <Section id="shortcuts" eyebrow="Productivity" title="Shortcuts & command palette" icon={Zap}>

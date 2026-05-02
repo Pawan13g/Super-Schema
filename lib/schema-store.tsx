@@ -38,6 +38,7 @@ interface SchemaStore {
   addIndex: (tableId: string, index: Omit<TableIndex, "id">) => void;
   removeIndex: (tableId: string, indexId: string) => void;
   updateTableComment: (tableId: string, comment: string) => void;
+  updateTableColor: (tableId: string, color: string) => void;
   addRelation: (relation: Omit<Relation, "id">) => void;
   removeRelation: (relationId: string) => void;
   createJunctionTable: (
@@ -325,6 +326,15 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  const updateTableColor = useCallback((tableId: string, color: string) => {
+    setSchema((prev) => ({
+      ...prev,
+      tables: prev.tables.map((table) =>
+        table.id === tableId ? { ...table, color } : table
+      ),
+    }));
+  }, []);
+
   const addRelation = useCallback((relation: Omit<Relation, "id">) => {
     const id = genId("rel");
     setSchema((prev) => ({
@@ -595,6 +605,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         addIndex,
         removeIndex,
         updateTableComment,
+        updateTableColor,
         addRelation,
         removeRelation,
         createJunctionTable,

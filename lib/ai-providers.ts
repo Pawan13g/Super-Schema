@@ -7,7 +7,8 @@ export type AiProvider =
   | "mistral"
   | "openrouter"
   | "grok"
-  | "bedrock";
+  | "bedrock"
+  | "ollama";
 
 export interface PublicSettings {
   aiEnabled: boolean;
@@ -28,7 +29,12 @@ export const DEFAULT_MODELS: Record<AiProvider, string> = {
   openrouter: "openai/gpt-4o-mini",
   grok: "grok-2-latest",
   bedrock: "anthropic.claude-3-5-sonnet-20240620-v1:0",
+  ollama: "llama3.2",
 };
+
+// Ollama runs locally and exposes an OpenAI-compatible REST API at /v1.
+// The API key is unused but ChatOpenAI requires a non-empty string.
+export const OLLAMA_DEFAULT_BASE_URL = "http://localhost:11434/v1";
 
 export const PROVIDER_LABEL: Record<AiProvider, string> = {
   google: "Google Gemini",
@@ -38,6 +44,7 @@ export const PROVIDER_LABEL: Record<AiProvider, string> = {
   openrouter: "OpenRouter",
   grok: "xAI Grok",
   bedrock: "AWS Bedrock",
+  ollama: "Ollama (local)",
 };
 
 export const PROVIDER_KEY_URL: Record<AiProvider, string> = {
@@ -48,6 +55,7 @@ export const PROVIDER_KEY_URL: Record<AiProvider, string> = {
   openrouter: "https://openrouter.ai/keys",
   grok: "https://console.x.ai/",
   bedrock: "https://console.aws.amazon.com/iam/home#/security_credentials",
+  ollama: "https://ollama.com/download",
 };
 
 // Providers that need an extra secret + region (AWS access key id + secret + region).
@@ -59,6 +67,19 @@ export const PROVIDER_NEEDS_SECRET: Record<AiProvider, boolean> = {
   openrouter: false,
   grok: false,
   bedrock: true,
+  ollama: false,
+};
+
+// Providers that don't need an API key (local / self-hosted).
+export const PROVIDER_KEY_OPTIONAL: Record<AiProvider, boolean> = {
+  google: false,
+  openai: false,
+  anthropic: false,
+  mistral: false,
+  openrouter: false,
+  grok: false,
+  bedrock: false,
+  ollama: true,
 };
 
 export const PROVIDER_KEY_LABEL: Record<AiProvider, string> = {
@@ -69,6 +90,7 @@ export const PROVIDER_KEY_LABEL: Record<AiProvider, string> = {
   openrouter: "API key",
   grok: "API key",
   bedrock: "AWS access key ID",
+  ollama: "Base URL (optional)",
 };
 
 export const PROVIDER_SECRET_LABEL: Record<AiProvider, string> = {
@@ -79,4 +101,5 @@ export const PROVIDER_SECRET_LABEL: Record<AiProvider, string> = {
   openrouter: "",
   grok: "",
   bedrock: "AWS secret access key",
+  ollama: "",
 };

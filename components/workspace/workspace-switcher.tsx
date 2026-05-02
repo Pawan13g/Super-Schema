@@ -92,9 +92,17 @@ export function WorkspaceSwitcher() {
           disabled={loading}
           className="flex h-7 items-center gap-2 rounded-lg border border-transparent px-2 text-sm font-medium hover:border-border hover:bg-accent disabled:opacity-50"
         >
-          <Database className="size-3.5 shrink-0 text-primary" />
+          {loading ? (
+            <Loader size="xs" />
+          ) : (
+            <Database className="size-3.5 shrink-0 text-primary" />
+          )}
           <span className="max-w-[140px] truncate">
-            {loading ? "Loading…" : (active?.name ?? "Workspace")}
+            {loading ? (
+              <span className="inline-block h-3 w-20 animate-pulse rounded bg-muted" />
+            ) : (
+              active?.name ?? "Workspace"
+            )}
           </span>
           <SaveIndicator status={saveStatus} />
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />

@@ -50,6 +50,7 @@ interface WorkspaceStore {
   activeSchemaId: string | null;
   loading: boolean;
   saveStatus: SaveStatus;
+  lastSavedAt: number | null;
 
   switchWorkspace: (id: string) => Promise<void>;
   createWorkspace: (name: string) => Promise<WorkspaceMeta | null>;
@@ -110,6 +111,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Server-side schema version we last loaded. Sent as `expectedVersion` on
   // PATCH so two tabs can detect concurrent edits.
   const loadedVersionRef = useRef<number | null>(null);
+  // Promise of the currently-running save (for the active schema). Subsequent
+  // saves await it before starting so they read the post-save version and
+  // never double-send the same expectedVersion (which would 409).
+  const saveInFlightRef = useRef<Promise<unknown> | null>(null);
 
   const refreshWorkspaces = useCallback(async () => {
     const res = await fetch("/api/workspaces");
@@ -519,6 +524,147 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     activeSchemaIdRef.current = activeSchemaId;
   }, [activeSchemaId]);
 
+  // Tracks last-saved time so the UI can show "saved 3s ago".
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+
+  // Strictly serialized PATCH path. Each call enqueues itself onto the chain
+  // BEFORE awaiting prior in-flight, so two near-simultaneous calls don't
+  // both await the same root promise and then race past each other (which
+  // would 409 the second). The ref is updated synchronously to the new tail.
+  // On 409 we adopt the server's currentVersion and silently retry once,
+  // since most 409s in single-tab use are version-bookkeeping drift, not a
+  // genuine cross-tab conflict.
+  const performSave = useCallback(
+    (
+      targetSchemaId: string,
+      payloadSchema: Schema,
+      opts: { interactive?: boolean } = {}
+    ): Promise<boolean> => {
+      const prior = saveInFlightRef.current ?? Promise.resolve();
+
+      const sendOnce = async (
+        attempt: number
+      ): Promise<{ ok: boolean; conflict: boolean }> => {
+        const expectedVersion = loadedVersionRef.current;
+        const res = await fetch(`/api/schemas/${targetSchemaId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            schemaJson: payloadSchema,
+            ...(expectedVersion !== null ? { expectedVersion } : {}),
+          }),
+        });
+
+        if (activeSchemaIdRef.current !== targetSchemaId) {
+          return { ok: false, conflict: false };
+        }
+
+        if (res.status === 409) {
+          // Server tells us its current version — adopt it and retry once.
+          try {
+            const data = (await res.json()) as {
+              currentVersion?: number | null;
+            };
+            if (typeof data.currentVersion === "number") {
+              loadedVersionRef.current = data.currentVersion;
+            }
+          } catch {
+            /* fall through */
+          }
+          if (attempt === 0) {
+            return await sendOnce(1);
+          }
+          return { ok: false, conflict: true };
+        }
+
+        if (!res.ok) {
+          return { ok: false, conflict: false };
+        }
+
+        // Success — read the new version off the response.
+        try {
+          const data = (await res.json()) as {
+            schema?: { version?: number };
+          };
+          if (typeof data.schema?.version === "number") {
+            loadedVersionRef.current = data.schema.version;
+          } else if (loadedVersionRef.current !== null) {
+            loadedVersionRef.current += 1;
+          }
+        } catch {
+          if (loadedVersionRef.current !== null) {
+            loadedVersionRef.current += 1;
+          }
+        }
+        return { ok: true, conflict: false };
+      };
+
+      const run: Promise<boolean> = (async () => {
+        try {
+          await prior;
+        } catch {
+          /* prior save errored — proceed */
+        }
+
+        if (activeSchemaIdRef.current !== targetSchemaId) return false;
+
+        const serialized = JSON.stringify(payloadSchema);
+        if (serialized === lastSavedSchemaRef.current) {
+          if (opts.interactive) toast.success("Already saved");
+          return true;
+        }
+
+        const myToken = ++saveTokenRef.current;
+        setSaveStatus("saving");
+
+        try {
+          const result = await sendOnce(0);
+
+          if (activeSchemaIdRef.current !== targetSchemaId) return false;
+
+          if (result.conflict) {
+            // Genuine conflict (retry already failed). Reload server state.
+            setSaveStatus("error");
+            if (opts.interactive) {
+              toast.error(
+                "This schema was edited in another tab. Reloading the latest version…"
+              );
+            }
+            await loadSchemaIntoCanvas(targetSchemaId);
+            return false;
+          }
+
+          if (result.ok) {
+            lastSavedSchemaRef.current = serialized;
+            setSaveStatus("saved");
+            setLastSavedAt(Date.now());
+            if (opts.interactive) toast.success("Saved");
+            setTimeout(() => {
+              if (myToken === saveTokenRef.current) setSaveStatus("idle");
+            }, 2500);
+            return true;
+          }
+
+          setSaveStatus("error");
+          if (opts.interactive) toast.error("Save failed");
+          return false;
+        } catch (err) {
+          setSaveStatus("error");
+          if (opts.interactive) {
+            toast.error(err instanceof Error ? err.message : "Save failed");
+          }
+          return false;
+        }
+      })();
+
+      saveInFlightRef.current = run.finally(() => {
+        if (saveInFlightRef.current === run) saveInFlightRef.current = null;
+      });
+      return run;
+    },
+    [loadSchemaIntoCanvas]
+  );
+
   // Debounced auto-save on schema change → save to active schema
   useEffect(() => {
     if (!activeSchemaId) return;
@@ -534,70 +680,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
 
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const targetSchemaId = activeSchemaId;
-    saveTimerRef.current = setTimeout(async () => {
-      // User switched schemas during debounce — drop this save.
+    saveTimerRef.current = setTimeout(() => {
       if (activeSchemaIdRef.current !== targetSchemaId) return;
-      const myToken = ++saveTokenRef.current;
-      const expectedVersion = loadedVersionRef.current;
-      setSaveStatus("saving");
-      try {
-        const res = await fetch(`/api/schemas/${targetSchemaId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            schemaJson: schema,
-            ...(expectedVersion !== null ? { expectedVersion } : {}),
-          }),
-        });
-        // If the user switched / triggered another save while this one was
-        // in flight, ignore the result — the newer save (or the new schema)
-        // owns state now.
-        if (myToken !== saveTokenRef.current) return;
-        if (activeSchemaIdRef.current !== targetSchemaId) return;
-
-        if (res.status === 409) {
-          // Optimistic-lock conflict — another tab moved the version forward.
-          setSaveStatus("error");
-          toast.error(
-            "This schema was edited in another tab. Reloading the latest version…"
-          );
-          await loadSchemaIntoCanvas(targetSchemaId);
-          return;
-        }
-        if (res.ok) {
-          lastSavedSchemaRef.current = serialized;
-          // Pull the new version out of the response so the next save uses it.
-          try {
-            const data = (await res.json()) as {
-              schema?: { version?: number };
-            };
-            if (typeof data.schema?.version === "number") {
-              loadedVersionRef.current = data.schema.version;
-            } else if (loadedVersionRef.current !== null) {
-              loadedVersionRef.current += 1;
-            }
-          } catch {
-            if (loadedVersionRef.current !== null) {
-              loadedVersionRef.current += 1;
-            }
-          }
-          setSaveStatus("saved");
-          setTimeout(() => {
-            // Only flip back to idle if no newer save is mid-flight.
-            if (myToken === saveTokenRef.current) setSaveStatus("idle");
-          }, 1500);
-        } else {
-          setSaveStatus("error");
-        }
-      } catch {
-        if (myToken === saveTokenRef.current) setSaveStatus("error");
-      }
+      void performSave(targetSchemaId, schema);
     }, DEBOUNCE_MS);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
-  }, [schema, activeSchemaId, loadSchemaIntoCanvas]);
+  }, [schema, activeSchemaId, performSave]);
 
   // Force-flush any pending debounced save and PATCH the current schema
   // immediately. Used by the Ctrl/Cmd+S keyboard shortcut.
@@ -608,60 +699,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    const serialized = JSON.stringify(schema);
-    if (serialized === lastSavedSchemaRef.current) {
-      toast.success("Already saved");
-      return;
-    }
-    const myToken = ++saveTokenRef.current;
-    const expectedVersion = loadedVersionRef.current;
-    setSaveStatus("saving");
-    try {
-      const res = await fetch(`/api/schemas/${targetSchemaId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          schemaJson: schema,
-          ...(expectedVersion !== null ? { expectedVersion } : {}),
-        }),
-      });
-      if (myToken !== saveTokenRef.current) return;
-      if (activeSchemaIdRef.current !== targetSchemaId) return;
-
-      if (res.status === 409) {
-        setSaveStatus("error");
-        toast.error("Schema was edited elsewhere. Reloading latest…");
-        await loadSchemaIntoCanvas(targetSchemaId);
-        return;
-      }
-      if (res.ok) {
-        lastSavedSchemaRef.current = serialized;
-        try {
-          const data = (await res.json()) as {
-            schema?: { version?: number };
-          };
-          if (typeof data.schema?.version === "number") {
-            loadedVersionRef.current = data.schema.version;
-          } else if (loadedVersionRef.current !== null) {
-            loadedVersionRef.current += 1;
-          }
-        } catch {
-          if (loadedVersionRef.current !== null) loadedVersionRef.current += 1;
-        }
-        setSaveStatus("saved");
-        toast.success("Saved");
-        setTimeout(() => {
-          if (myToken === saveTokenRef.current) setSaveStatus("idle");
-        }, 1500);
-      } else {
-        setSaveStatus("error");
-        toast.error("Save failed");
-      }
-    } catch (err) {
-      setSaveStatus("error");
-      toast.error(err instanceof Error ? err.message : "Save failed");
-    }
-  }, [schema, loadSchemaIntoCanvas]);
+    await performSave(targetSchemaId, schema, { interactive: true });
+  }, [schema, performSave]);
 
   return (
     <WorkspaceContext.Provider
@@ -674,6 +713,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         activeSchemaId,
         loading,
         saveStatus,
+        lastSavedAt,
         switchWorkspace,
         createWorkspace,
         renameWorkspace,

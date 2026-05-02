@@ -25,6 +25,7 @@ export function ProjectSchemaNav() {
     switchProject,
     switchSchema,
     createSchemaInProject,
+    loading,
   } = useWorkspace();
 
   const [projectOpen, setProjectOpen] = useState(false);
@@ -71,7 +72,11 @@ export function ProjectSchemaNav() {
         >
           <FolderOpen className="size-3.5 shrink-0 text-blue-500" />
           <span className="max-w-[130px] truncate font-medium">
-            {activeProject?.name ?? "Project"}
+            {loading && !activeProject ? (
+              <span className="inline-block h-3 w-16 animate-pulse rounded bg-muted" />
+            ) : (
+              activeProject?.name ?? "Project"
+            )}
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
@@ -130,7 +135,11 @@ export function ProjectSchemaNav() {
         >
           <FileText className="size-3.5 shrink-0 text-emerald-500" />
           <span className="max-w-[130px] truncate font-medium">
-            {activeSchema?.name ?? "Schema"}
+            {loading && !activeSchema ? (
+              <span className="inline-block h-3 w-16 animate-pulse rounded bg-muted" />
+            ) : (
+              activeSchema?.name ?? "Schema"
+            )}
           </span>
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
