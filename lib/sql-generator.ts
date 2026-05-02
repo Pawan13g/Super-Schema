@@ -157,6 +157,45 @@ function generateForeignKeys(
   return fks;
 }
 
+// Map our cross-dialect IndexType down to what each engine actually supports.
+// Returns either USING-clause text (PG, MySQL on btree/hash) or a token to
+// promote the index syntax (MySQL FULLTEXT / SPATIAL).
+function resolveIndexMethod(
+  type: string | undefined,
+  dialect: SqlDialect
+): { syntaxKind: "regular" | "fulltext" | "spatial"; using: string | null } {
+  const t = type ?? "btree";
+  if (dialect === "postgresql") {
+    // PG accepts btree, hash, gin, gist, brin, spgist.
+    const pgMap: Record<string, string> = {
+      btree: "btree",
+      hash: "hash",
+      gin: "gin",
+      gist: "gist",
+      brin: "brin",
+      spgist: "spgist",
+      // MySQL FULLTEXT → GIN with tsvector usually; we emit GIN as a sensible
+      // default. Spatial → GIST.
+      fulltext: "gin",
+      spatial: "gist",
+    };
+    const using = pgMap[t] ?? "btree";
+    return {
+      syntaxKind: "regular",
+      using: using === "btree" ? null : using,
+    };
+  }
+  if (dialect === "mysql") {
+    if (t === "fulltext") return { syntaxKind: "fulltext", using: null };
+    if (t === "spatial") return { syntaxKind: "spatial", using: null };
+    if (t === "hash") return { syntaxKind: "regular", using: "HASH" };
+    // Everything else (gin, gist, brin, spgist, btree) collapses to BTREE.
+    return { syntaxKind: "regular", using: null };
+  }
+  // SQLite ignores method entirely.
+  return { syntaxKind: "regular", using: null };
+}
+
 function generateIndexStatements(table: Table, dialect: SqlDialect): string[] {
   const q = (n: string) => quoteIdentifier(n, dialect);
   const statements: string[] = [];
@@ -170,10 +209,37 @@ function generateIndexStatements(table: Table, dialect: SqlDialect): string[] {
     if (columns.length === 0) continue;
 
     const indexName = index.name.trim() || `idx_${table.name}_${columns.join("_")}`;
+    const method = resolveIndexMethod(index.type, dialect);
+
+    if (method.syntaxKind === "fulltext") {
+      // MySQL: CREATE FULLTEXT INDEX … ON tbl (cols)
+      statements.push(
+        `CREATE FULLTEXT INDEX ${q(indexName)} ON ${q(table.name)} (${columns.join(", ")});`
+      );
+      continue;
+    }
+    if (method.syntaxKind === "spatial") {
+      statements.push(
+        `CREATE SPATIAL INDEX ${q(indexName)} ON ${q(table.name)} (${columns.join(", ")});`
+      );
+      continue;
+    }
+
     const unique = index.unique ? "UNIQUE " : "";
-    statements.push(
-      `CREATE ${unique}INDEX ${q(indexName)} ON ${q(table.name)} (${columns.join(", ")});`
-    );
+    if (dialect === "postgresql" && method.using) {
+      statements.push(
+        `CREATE ${unique}INDEX ${q(indexName)} ON ${q(table.name)} USING ${method.using} (${columns.join(", ")});`
+      );
+    } else if (dialect === "mysql" && method.using) {
+      // MySQL syntax: CREATE [UNIQUE] INDEX name USING HASH ON tbl (cols).
+      statements.push(
+        `CREATE ${unique}INDEX ${q(indexName)} USING ${method.using} ON ${q(table.name)} (${columns.join(", ")});`
+      );
+    } else {
+      statements.push(
+        `CREATE ${unique}INDEX ${q(indexName)} ON ${q(table.name)} (${columns.join(", ")});`
+      );
+    }
   }
 
   return statements;

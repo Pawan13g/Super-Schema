@@ -27,6 +27,9 @@ interface SchemaStore {
   setSelectedTableId: (id: string | null) => void;
   addTable: (name: string) => void;
   removeTable: (tableId: string) => void;
+  // Bulk-remove tables. Drops the tables + every relation that touched them
+  // in a single history-tracked update.
+  removeTables: (tableIds: string[]) => void;
   updateTableName: (tableId: string, name: string) => void;
   updateTablePosition: (tableId: string, position: { x: number; y: number }) => void;
   setTablePositions: (
@@ -41,6 +44,13 @@ interface SchemaStore {
     tableId: string,
     sourceColumnId: string,
     targetColumnId: string,
+    position: "before" | "after"
+  ) => void;
+  // Reorder a table within the schema's table list. Used by sidebar tree
+  // drag-and-drop. No-op for same/unknown ids.
+  reorderTable: (
+    sourceTableId: string,
+    targetTableId: string,
     position: "before" | "after"
   ) => void;
   addIndex: (tableId: string, index: Omit<TableIndex, "id">) => void;
@@ -204,13 +214,24 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   const canUndo = historyRef.current.past.length > 0;
   const canRedo = historyRef.current.future.length > 0;
 
+  // Find a non-colliding name by appending "_N" if the requested name is
+  // already taken in `taken`. Returns the requested name if unique.
+  const dedupeName = (requested: string, taken: Set<string>): string => {
+    if (!taken.has(requested)) return requested;
+    let n = 2;
+    while (taken.has(`${requested}_${n}`)) n++;
+    return `${requested}_${n}`;
+  };
+
   const addTable = useCallback((name: string) => {
     const id = genId("tbl");
     setSchema((prev) => {
+      const taken = new Set(prev.tables.map((t) => t.name));
+      const finalName = dedupeName(name, taken);
       const color = TABLE_COLORS[prev.tables.length % TABLE_COLORS.length];
       const table: Table = normalizeTable({
         id,
-        name,
+        name: finalName,
         color,
         columns: [{ ...makeDefaultColumn() }],
         position: { x: 100 + Math.random() * 300, y: 100 + Math.random() * 200 },
@@ -230,11 +251,34 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     setSelectedTableId((prev) => (prev === tableId ? null : prev));
   }, []);
 
-  const updateTableName = useCallback((tableId: string, name: string) => {
+  const removeTables = useCallback((tableIds: string[]) => {
+    if (tableIds.length === 0) return;
+    const ids = new Set(tableIds);
     setSchema((prev) => ({
-      ...prev,
-      tables: prev.tables.map((t) => (t.id === tableId ? { ...t, name } : t)),
+      tables: prev.tables.filter((t) => !ids.has(t.id)),
+      relations: prev.relations.filter(
+        (r) => !ids.has(r.sourceTable) && !ids.has(r.targetTable)
+      ),
     }));
+    setSelectedTableId((prev) => (prev && ids.has(prev) ? null : prev));
+  }, []);
+
+  const updateTableName = useCallback((tableId: string, name: string) => {
+    setSchema((prev) => {
+      const trimmed = name.trim();
+      if (!trimmed) return prev;
+      // Reject duplicate table names within the same schema.
+      const collision = prev.tables.some(
+        (t) => t.id !== tableId && t.name === trimmed
+      );
+      if (collision) return prev;
+      return {
+        ...prev,
+        tables: prev.tables.map((t) =>
+          t.id === tableId ? { ...t, name: trimmed } : t
+        ),
+      };
+    });
   }, []);
 
   const updateTablePosition = useCallback(
@@ -263,49 +307,131 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   );
 
   const addColumn = useCallback((tableId: string) => {
-    const col: Column = {
-      id: genId("col"),
-      name: "new_column",
-      type: "VARCHAR",
-      constraints: [],
-      comment: "",
-    };
     setSchema((prev) => ({
       ...prev,
-      tables: prev.tables.map((t) =>
-        t.id === tableId ? { ...t, columns: [...t.columns, col] } : t
-      ),
+      tables: prev.tables.map((t) => {
+        if (t.id !== tableId) return t;
+        const taken = new Set(t.columns.map((c) => c.name));
+        const col: Column = {
+          id: genId("col"),
+          name: dedupeName("new_column", taken),
+          type: "VARCHAR",
+          constraints: [],
+          comment: "",
+        };
+        return { ...t, columns: [...t.columns, col] };
+      }),
     }));
   }, []);
 
   const removeColumn = useCallback((tableId: string, columnId: string) => {
-    setSchema((prev) => ({
-      ...prev,
-      tables: prev.tables.map((t) =>
-        t.id === tableId
-          ? { ...t, columns: t.columns.filter((c) => c.id !== columnId) }
-          : t
-      ),
-    }));
+    setSchema((prev) => {
+      const targetTable = prev.tables.find((t) => t.id === tableId);
+      const targetCol = targetTable?.columns.find((c) => c.id === columnId);
+      const targetColName = targetCol?.name;
+      return {
+        ...prev,
+        // Drop relations that touched this column (either as source or target).
+        relations: prev.relations.filter(
+          (r) =>
+            !(
+              (r.sourceTable === tableId && r.sourceColumn === columnId) ||
+              (r.targetTable === tableId && r.targetColumn === columnId)
+            )
+        ),
+        tables: prev.tables.map((t) => {
+          if (t.id === tableId) {
+            // Drop the column itself; also drop any indexes that referenced
+            // it; collapse empty indexes.
+            const nextCols = t.columns.filter((c) => c.id !== columnId);
+            const nextIndexes = (t.indexes ?? [])
+              .map((idx) => ({
+                ...idx,
+                columns: idx.columns.filter((cid) => cid !== columnId),
+              }))
+              .filter((idx) => idx.columns.length > 0);
+            return { ...t, columns: nextCols, indexes: nextIndexes };
+          }
+          // Other tables: clear any FK references that pointed here by name.
+          if (!targetTable || !targetColName) return t;
+          let touched = false;
+          const cols = t.columns.map((c) => {
+            if (
+              c.references?.table === targetTable.name &&
+              c.references.column === targetColName
+            ) {
+              touched = true;
+              return {
+                ...c,
+                references: undefined,
+                constraints: c.constraints.filter((k) => k !== "REFERENCES"),
+              };
+            }
+            return c;
+          });
+          return touched ? { ...t, columns: cols } : t;
+        }),
+      };
+    });
   }, []);
 
   const updateColumn = useCallback(
     (tableId: string, columnId: string, updates: Partial<Column>) => {
       setSchema((prev) => ({
         ...prev,
-        tables: prev.tables.map((t) =>
-          t.id === tableId
-            ? {
-                ...t,
-                columns: t.columns.map((c) =>
-                  c.id === columnId ? { ...c, ...updates } : c
-                ),
-              }
-            : t
-        ),
+        tables: prev.tables.map((t) => {
+          if (t.id !== tableId) return t;
+          // Block renames that collide with another column in the same table.
+          // Other field updates pass through unchanged.
+          if (
+            typeof updates.name === "string" &&
+            updates.name.trim() &&
+            t.columns.some(
+              (c) => c.id !== columnId && c.name === updates.name?.trim()
+            )
+          ) {
+            const safe = { ...updates };
+            delete safe.name;
+            return {
+              ...t,
+              columns: t.columns.map((c) =>
+                c.id === columnId ? { ...c, ...safe } : c
+              ),
+            };
+          }
+          return {
+            ...t,
+            columns: t.columns.map((c) =>
+              c.id === columnId ? { ...c, ...updates } : c
+            ),
+          };
+        }),
       }));
     },
     []
+  );
+
+  const reorderTable = useCallback(
+    (
+      sourceTableId: string,
+      targetTableId: string,
+      position: "before" | "after"
+    ) => {
+      if (sourceTableId === targetTableId) return;
+      setSchema((prev) => {
+        const fromIdx = prev.tables.findIndex((t) => t.id === sourceTableId);
+        const toIdx = prev.tables.findIndex((t) => t.id === targetTableId);
+        if (fromIdx === -1 || toIdx === -1) return prev;
+        const next = [...prev.tables];
+        const [moved] = next.splice(fromIdx, 1);
+        let insertAt = next.findIndex((t) => t.id === targetTableId);
+        if (insertAt === -1) return prev;
+        if (position === "after") insertAt += 1;
+        next.splice(insertAt, 0, moved);
+        return { ...prev, tables: next };
+      });
+    },
+    [setSchema]
   );
 
   const reorderColumn = useCallback(
@@ -387,10 +513,30 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeRelation = useCallback((relationId: string) => {
-    setSchema((prev) => ({
-      ...prev,
-      relations: prev.relations.filter((r) => r.id !== relationId),
-    }));
+    setSchema((prev) => {
+      const rel = prev.relations.find((r) => r.id === relationId);
+      if (!rel) return prev;
+      return {
+        ...prev,
+        relations: prev.relations.filter((r) => r.id !== relationId),
+        // Strip the REFERENCES constraint + `references` field from the
+        // source column so the FK badge / arrow stops claiming a link.
+        tables: prev.tables.map((t) => {
+          if (t.id !== rel.sourceTable) return t;
+          return {
+            ...t,
+            columns: t.columns.map((c) => {
+              if (c.id !== rel.sourceColumn) return c;
+              return {
+                ...c,
+                references: undefined,
+                constraints: c.constraints.filter((k) => k !== "REFERENCES"),
+              };
+            }),
+          };
+        }),
+      };
+    });
   }, []);
 
   const createJunctionTable = useCallback(
@@ -639,6 +785,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         setSelectedTableId,
         addTable,
         removeTable,
+        removeTables,
         updateTableName,
         updateTablePosition,
         setTablePositions,
@@ -646,6 +793,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         removeColumn,
         updateColumn,
         reorderColumn,
+        reorderTable,
         addIndex,
         removeIndex,
         updateTableComment,

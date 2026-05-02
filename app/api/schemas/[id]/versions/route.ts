@@ -45,3 +45,25 @@ export async function GET(
     currentVersion: owned.version,
   });
 }
+
+// DELETE /api/schemas/:id/versions — wipe ALL history snapshots for a
+// schema. The current canvas state is untouched. Used by the "Clear history"
+// action in the history panel.
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id } = await params;
+
+  const owned = await getSchemaIfOwned(id, session.user.id);
+  if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
+
+  const result = await prisma.schemaVersion.deleteMany({
+    where: { schemaId: id },
+  });
+  return Response.json({ ok: true, deleted: result.count });
+}

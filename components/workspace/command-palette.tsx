@@ -383,11 +383,8 @@ export function CommandPalette() {
               }
             }}
             placeholder="Type a command or search tables, schemas, pages"
-            className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            className="flex-1 bg-transparent pr-10 text-sm outline-none placeholder:text-muted-foreground"
           />
-          <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            Esc
-          </kbd>
         </div>
         <div className="max-h-[60vh] overflow-y-auto p-1.5">
           {filtered.length === 0 ? (

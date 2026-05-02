@@ -126,13 +126,12 @@ export const authConfig: NextAuthConfig = {
     async redirect({ url, baseUrl }) {
       try {
         const target = new URL(url, baseUrl);
+        // Block off-origin redirects.
         if (target.origin !== baseUrl) return baseUrl;
-        if (
-          target.pathname.startsWith("/sign-in") ||
-          target.pathname.startsWith("/sign-up")
-        ) {
-          return baseUrl;
-        }
+        // Honor explicit /sign-in callbackUrl (used by signOut). Earlier this
+        // path was rewritten to baseUrl, which middleware then bounced to
+        // /landing — sending logged-out users to the marketing page instead
+        // of the login form.
         return target.toString();
       } catch {
         return baseUrl;

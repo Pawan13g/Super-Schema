@@ -75,3 +75,29 @@ export async function POST(
 
   return Response.json({ schema });
 }
+
+// DELETE /api/schemas/:id/versions/:versionId — drop a single history entry.
+// The schema's current state is untouched.
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string; versionId: string }> }
+) {
+  const session = await auth();
+  if (!session?.user?.id) {
+    return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  const { id, versionId } = await params;
+
+  const owned = await getSchemaIfOwned(id, session.user.id);
+  if (!owned) return Response.json({ error: "Not found" }, { status: 404 });
+
+  const version = await prisma.schemaVersion.findUnique({
+    where: { id: versionId },
+  });
+  if (!version || version.schemaId !== id) {
+    return Response.json({ error: "Version not found" }, { status: 404 });
+  }
+
+  await prisma.schemaVersion.delete({ where: { id: versionId } });
+  return Response.json({ ok: true });
+}

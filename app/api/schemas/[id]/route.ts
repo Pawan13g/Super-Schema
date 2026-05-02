@@ -15,6 +15,36 @@ const patchSchema = z.object({
     .optional(),
 });
 
+// Stable JSON serialization with sorted object keys, so two semantically
+// identical schemas (e.g. produced by different client paths) compare equal
+// even if their key order differs.
+function canonicalStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) {
+    return `[${value.map((v) => canonicalStringify(v)).join(",")}]`;
+  }
+  const obj = value as Record<string, unknown>;
+  const keys = Object.keys(obj).sort();
+  return `{${keys
+    .map((k) => `${JSON.stringify(k)}:${canonicalStringify(obj[k])}`)
+    .join(",")}}`;
+}
+
+// Returns a copy of the schema with cosmetic-only fields stripped (table
+// `position`). Used to detect *structural* changes so a position-only drag
+// doesn't carve a new history version.
+function withoutCosmetics(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  if (Array.isArray(value)) return value.map((v) => withoutCosmetics(v));
+  const obj = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+  for (const k of Object.keys(obj)) {
+    if (k === "position") continue;
+    out[k] = withoutCosmetics(obj[k]);
+  }
+  return out;
+}
+
 export async function GET(
   _request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -63,19 +93,45 @@ export async function PATCH(
       return Response.json({ error: "Invalid input" }, { status: 400 });
     }
 
+    // Detect whether the incoming JSON differs from what's already stored.
+    // No-diff PATCHes (e.g. no-op renames, debounced retries) shouldn't bump
+    // the version or create a snapshot — otherwise the history tab fills up
+    // with identical entries.
+    const incomingJson =
+      parsed.data.schemaJson !== undefined
+        ? canonicalStringify(parsed.data.schemaJson)
+        : null;
+    const currentJson =
+      parsed.data.schemaJson !== undefined
+        ? canonicalStringify(owned.schemaJson)
+        : null;
+    const contentChanged =
+      incomingJson !== null && incomingJson !== currentJson;
+
+    // Detect *structural* changes (anything other than table positions). A
+    // pure drag-to-reposition still saves the new schemaJson but should not
+    // create a SchemaVersion snapshot — history is for meaningful edits.
+    const structuralChanged =
+      parsed.data.schemaJson !== undefined &&
+      canonicalStringify(withoutCosmetics(parsed.data.schemaJson)) !==
+        canonicalStringify(withoutCosmetics(owned.schemaJson));
+
     const data: Prisma.SchemaUpdateInput = {};
     if (parsed.data.name !== undefined) data.name = parsed.data.name;
     if (parsed.data.schemaJson !== undefined) {
       data.schemaJson = parsed.data.schemaJson as Prisma.InputJsonValue;
-      // Bump version on every content change so the version-history panel can
-      // index snapshots monotonically.
-      data.version = { increment: 1 };
+      // Bump version only on real structural change so position-only drags
+      // don't inflate the version counter or history list.
+      if (structuralChanged) {
+        data.version = { increment: 1 };
+      }
     }
 
     const schema = await prisma.schema.update({ where: { id }, data });
 
-    // Snapshot every content change into SchemaVersion (capped at 50 per schema).
-    if (parsed.data.schemaJson) {
+    // Snapshot only on structural change (skip pure position drags +
+    // no-op PATCHes), capped at 50 versions per schema.
+    if (parsed.data.schemaJson && structuralChanged && contentChanged) {
       await prisma.schemaVersion.upsert({
         where: { schemaId_version: { schemaId: id, version: schema.version } },
         create: {

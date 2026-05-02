@@ -448,12 +448,18 @@ export function SqlPreview() {
           </div>
         </TabsContent>
         {/* Problems tab */}
-        <TabsContent value="problems" className="flex-1 overflow-hidden">
+        <TabsContent
+          value="problems"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <ProblemsPanel />
         </TabsContent>
 
         {/* Version History tab */}
-        <TabsContent value="history" className="flex-1 overflow-hidden">
+        <TabsContent
+          value="history"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <VersionHistoryPanel />
         </TabsContent>
       </Tabs>

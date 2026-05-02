@@ -56,10 +56,15 @@ export function SchemaSidebar() {
     removeColumn,
     updateColumn,
     reorderColumn,
+    reorderTable,
     addIndex,
     removeIndex,
     updateTableComment,
   } = useSchema();
+  const [tableDragOverId, setTableDragOverId] = useState<{
+    id: string;
+    position: "before" | "after";
+  } | null>(null);
 
   const [searchQuery, setSearchQuery] = useState("");
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -310,24 +315,89 @@ export function SchemaSidebar() {
                   "application/super-schema-table",
                   table.id
                 );
+                e.dataTransfer.setData(
+                  "application/super-schema-table-reorder",
+                  table.id
+                );
                 e.dataTransfer.setData("text/plain", table.name);
                 e.dataTransfer.effectAllowed = "move";
               };
+
+              const handleRowDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+                if (
+                  !e.dataTransfer.types.includes(
+                    "application/super-schema-table-reorder"
+                  )
+                )
+                  return;
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "move";
+                const rect = e.currentTarget.getBoundingClientRect();
+                const offset = e.clientY - rect.top;
+                setTableDragOverId({
+                  id: table.id,
+                  position: offset < rect.height / 2 ? "before" : "after",
+                });
+              };
+
+              const handleRowDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+                if (e.currentTarget.contains(e.relatedTarget as Node | null))
+                  return;
+                setTableDragOverId((cur) =>
+                  cur?.id === table.id ? null : cur
+                );
+              };
+
+              const handleRowDrop = (e: React.DragEvent<HTMLDivElement>) => {
+                const sourceId = e.dataTransfer.getData(
+                  "application/super-schema-table-reorder"
+                );
+                if (!sourceId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                const rect = e.currentTarget.getBoundingClientRect();
+                const offset = e.clientY - rect.top;
+                const position: "before" | "after" =
+                  offset < rect.height / 2 ? "before" : "after";
+                setTableDragOverId(null);
+                if (sourceId !== table.id) {
+                  reorderTable(sourceId, table.id, position);
+                }
+              };
+
+              const tableDropIndicator =
+                tableDragOverId?.id === table.id
+                  ? tableDragOverId.position
+                  : null;
 
               return (
                 <div key={table.id} className="select-none">
                   {/* Table row */}
                   <div
                     className={cn(
-                      "group/table flex items-center gap-1 px-2 py-1 text-[12px] transition-colors",
+                      "group/table relative flex items-center gap-1 px-2 py-1 text-[12px] transition-colors",
                       isSelected
                         ? "bg-primary/10 text-primary"
                         : "hover:bg-muted/60"
                     )}
                     draggable={renamingTableId !== table.id}
                     onDragStart={handleDragStart}
-                    title="Drag to reposition on the canvas"
+                    onDragOver={handleRowDragOver}
+                    onDragLeave={handleRowDragLeave}
+                    onDrop={handleRowDrop}
+                    onDragEnd={() => setTableDragOverId(null)}
+                    title="Drag to canvas to reposition · drag onto another row to reorder"
                   >
+                    {tableDropIndicator && (
+                      <span
+                        className={cn(
+                          "pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-primary",
+                          tableDropIndicator === "before"
+                            ? "-top-px"
+                            : "-bottom-px"
+                        )}
+                      />
+                    )}
                     <button
                       type="button"
                       onClick={() => toggleTable(table.id)}

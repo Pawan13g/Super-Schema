@@ -71,11 +71,58 @@ export interface Column {
   };
 }
 
+// Common index method names across PostgreSQL, MySQL, SQLite. Not every
+// dialect supports every kind — the SQL generator picks a sensible fallback.
+//
+// - btree: default ordered index, all dialects.
+// - hash: equality only. PG supports HASH; MySQL maps memory-engine; SQLite
+//   ignores and falls back to B-tree.
+// - gin: PG inverted index for arrays / jsonb / tsvector full-text.
+// - gist: PG generalized search tree (geometry, ranges, exclusion).
+// - brin: PG block-range index for very large append-only tables.
+// - spgist: PG space-partitioned GiST (quad-trees, radix).
+// - fulltext: MySQL FULLTEXT, mapped to GIN on PG.
+// - spatial: MySQL SPATIAL on geometry, mapped to GIST on PG.
+export type IndexType =
+  | "btree"
+  | "hash"
+  | "gin"
+  | "gist"
+  | "brin"
+  | "spgist"
+  | "fulltext"
+  | "spatial";
+
+export const INDEX_TYPES: IndexType[] = [
+  "btree",
+  "hash",
+  "gin",
+  "gist",
+  "brin",
+  "spgist",
+  "fulltext",
+  "spatial",
+];
+
+export const INDEX_TYPE_LABELS: Record<IndexType, string> = {
+  btree: "B-tree (default)",
+  hash: "Hash (equality)",
+  gin: "GIN (jsonb / arrays / tsvector)",
+  gist: "GiST (geometry / ranges)",
+  brin: "BRIN (large append-only)",
+  spgist: "SP-GiST (quad / radix)",
+  fulltext: "Full-text",
+  spatial: "Spatial",
+};
+
 export interface TableIndex {
   id: string;
   name: string;
   columns: string[];
   unique: boolean;
+  // Index method. Defaults to "btree" for backwards compatibility — older
+  // schemas saved without this field continue to round-trip.
+  type?: IndexType;
 }
 
 export const TABLE_COLORS = [

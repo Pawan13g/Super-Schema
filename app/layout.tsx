@@ -159,12 +159,35 @@ export default function RootLayout({
             </TooltipProvider>
             <PwaRegister />
             <Toaster
-              richColors
               closeButton
-              position="top-right"
+              position="bottom-right"
               theme="system"
-              offset={56}
-              mobileOffset={56}
+              offset={20}
+              mobileOffset={20}
+              gap={10}
+              toastOptions={{
+                classNames: {
+                  toast:
+                    "group/toast pointer-events-auto !flex w-full items-center !gap-3 !rounded-2xl !border !border-border !bg-card/95 !px-3.5 !py-3 !pr-10 !text-sm !text-foreground !shadow-[0_8px_30px_-10px_rgba(0,0,0,0.25)] backdrop-blur-md",
+                  title: "!font-semibold !leading-tight !text-[13px]",
+                  description:
+                    "!mt-0.5 !text-[11.5px] !leading-snug !text-muted-foreground",
+                  icon: "!flex !size-9 !shrink-0 !items-center !justify-center !rounded-full !bg-primary/15 !text-primary [&_svg]:!size-4",
+                  closeButton:
+                    "!absolute !right-2.5 !top-1/2 !left-auto !bottom-auto !size-6 !rounded-full !border-0 !bg-transparent !text-muted-foreground !p-0 !m-0 hover:!bg-muted hover:!text-foreground [&_svg]:!size-3.5 [&_svg]:!opacity-100 [transform:translateY(-50%)!important]",
+                  actionButton:
+                    "!h-8 !rounded-full !bg-primary !px-3.5 !text-[12px] !font-semibold !text-primary-foreground hover:!bg-primary/90",
+                  cancelButton:
+                    "!h-8 !rounded-full !border !border-border !bg-card !px-3.5 !text-[12px] !font-medium !text-foreground hover:!bg-muted",
+                  success:
+                    "[&_[data-icon]]:!bg-emerald-500/15 [&_[data-icon]]:!text-emerald-600",
+                  error:
+                    "[&_[data-icon]]:!bg-red-500/15 [&_[data-icon]]:!text-red-600",
+                  warning:
+                    "[&_[data-icon]]:!bg-amber-500/15 [&_[data-icon]]:!text-amber-600",
+                  info: "[&_[data-icon]]:!bg-cyan-500/15 [&_[data-icon]]:!text-cyan-600",
+                },
+              }}
             />
           </ThemeProvider>
         </AuthSessionProvider>

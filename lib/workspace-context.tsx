@@ -154,6 +154,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   // Always-current active schema id, readable inside async closures so a
   // late-resolving save can detect it should drop its result.
   const activeSchemaIdRef = useRef<string | null>(null);
+  // Ref that always points to the latest canvas schema so async callers
+  // (saveNow, post-import flush, etc.) read fresh state instead of a
+  // closure that captured the stale schema at render time.
+  const schemaRef = useRef(schema);
+  useEffect(() => {
+    schemaRef.current = schema;
+  }, [schema]);
   // Promise of the currently-running save. New saves chain after it (set
   // synchronously, before any await) so two near-simultaneous edits don't
   // race and double-write.
@@ -768,8 +775,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       clearTimeout(saveTimerRef.current);
       saveTimerRef.current = null;
     }
-    await performSave(targetSchemaId, schema, { interactive: true });
-  }, [schema, performSave]);
+    // Read the latest schema via ref so a force-flush after a state mutation
+    // (e.g. live-DB import) PATCHes the new state, not the stale closure.
+    await performSave(targetSchemaId, schemaRef.current, { interactive: true });
+  }, [performSave]);
 
   return (
     <WorkspaceContext.Provider

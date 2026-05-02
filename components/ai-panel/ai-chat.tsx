@@ -333,12 +333,12 @@ export function AiChat({ onClose }: { onClose: () => void }) {
   const hasTables = schema.tables.length > 0;
 
   return (
-    <div className="flex h-full flex-col bg-background">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden bg-background">
       {/* Header */}
-      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
-        <Sparkles className="size-4 text-primary" />
-        <span className="text-sm font-semibold">AI</span>
-        <div className="ml-auto flex items-center gap-0.5">
+      <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b px-2 py-2 sm:px-3">
+        <Sparkles className="size-4 shrink-0 text-primary" />
+        <span className="truncate text-sm font-semibold">AI</span>
+        <div className="ml-auto flex shrink-0 items-center gap-0.5">
           <Button
             variant="ghost"
             size="icon-xs"
@@ -385,8 +385,8 @@ export function AiChat({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto">
-        <div className="mx-auto flex max-w-3xl flex-col gap-5 px-4 py-5">
+      <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+        <div className="mx-auto flex w-full max-w-3xl flex-col gap-4 px-3 py-4 sm:gap-5 sm:px-4 sm:py-5">
           {aiReady === false && (
             <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-3">
               <p className="text-xs font-medium text-foreground">AI not configured</p>
@@ -417,7 +417,7 @@ export function AiChat({ onClose }: { onClose: () => void }) {
               const isEditing = editingId === msg.id;
               return (
                 <div key={msg.id} className="group/msg flex justify-end">
-                  <div className="flex w-full max-w-[80%] flex-col items-end gap-1">
+                  <div className="flex w-full max-w-[88%] flex-col items-end gap-1 sm:max-w-[80%]">
                     {isEditing ? (
                       <div className="w-full rounded-2xl bg-muted px-3.5 py-2.5">
                         <textarea
@@ -487,7 +487,7 @@ export function AiChat({ onClose }: { onClose: () => void }) {
                   <Sparkles className="size-3.5 text-primary" />
                 </div>
                 <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-                  <div className="prose prose-sm max-w-none whitespace-pre-wrap text-sm leading-relaxed text-foreground dark:prose-invert">
+                  <div className="prose prose-sm max-w-none whitespace-pre-wrap break-words text-sm leading-relaxed text-foreground dark:prose-invert">
                     {msg.content}
                   </div>
                   <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
@@ -533,9 +533,9 @@ export function AiChat({ onClose }: { onClose: () => void }) {
       </div>
 
       {/* Input */}
-      <div className="shrink-0 border-t bg-background/80 px-3 pb-3 pt-2 backdrop-blur">
-        <div className="mx-auto max-w-3xl">
-          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm focus-within:border-foreground/30">
+      <div className="shrink-0 border-t bg-background/80 px-2 pb-2 pt-2 backdrop-blur sm:px-3 sm:pb-3">
+        <div className="mx-auto w-full max-w-3xl">
+          <div className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-sm focus-within:border-foreground/30 sm:gap-2 sm:p-2">
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}

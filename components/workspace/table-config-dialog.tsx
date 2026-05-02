@@ -25,9 +25,12 @@ import { Tip } from "@/components/ui/tip";
 import { useSchema } from "@/lib/schema-store";
 import {
   COLUMN_TYPES,
+  INDEX_TYPES,
+  INDEX_TYPE_LABELS,
   TABLE_COLORS,
   type ColumnConstraint,
   type ColumnType,
+  type IndexType,
   type Relation,
 } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -193,16 +196,21 @@ function TableConfigBody({
                     type="button"
                     onClick={() => updateTableColor(tableId, c)}
                     className={cn(
-                      "size-7 rounded-full border-2 transition-all",
+                      "relative flex size-7 items-center justify-center rounded-full border-2 transition-all",
                       table.color === c
-                        ? "border-foreground scale-110"
+                        ? "scale-110 border-foreground ring-2 ring-foreground/20"
                         : "border-transparent hover:scale-105"
                     )}
                     style={{ backgroundColor: c }}
                     title={c}
+                    aria-label={`Color ${c}`}
                   >
                     {table.color === c && (
-                      <Check className="size-3.5 text-white drop-shadow" />
+                      <Check
+                        className="size-4 text-white"
+                        strokeWidth={3}
+                        style={{ filter: "drop-shadow(0 1px 1px rgba(0,0,0,0.5))" }}
+                      />
                     )}
                   </button>
                 ))}
@@ -226,23 +234,6 @@ function TableConfigBody({
               </p>
             </div>
 
-            <div className="grid gap-1.5">
-              <Label className="text-xs text-muted-foreground">
-                Stats
-              </Label>
-              <div className="grid grid-cols-3 gap-2">
-                <StatTile label="Columns" value={table.columns.length} />
-                <StatTile label="Indexes" value={(table.indexes ?? []).length} />
-                <StatTile
-                  label="Relations"
-                  value={
-                    schema.relations.filter(
-                      (r) => r.sourceTable === tableId || r.targetTable === tableId
-                    ).length
-                  }
-                />
-              </div>
-            </div>
           </div>
         </ScrollArea>
       </TabsContent>
@@ -261,8 +252,8 @@ function TableConfigBody({
       <TabsContent value="indexes" className="overflow-hidden">
         <IndexesTab
           tableId={tableId}
-          onAddIndex={(name, columnIds, unique) =>
-            addIndex(tableId, { name, columns: columnIds, unique })
+          onAddIndex={(name, columnIds, unique, type) =>
+            addIndex(tableId, { name, columns: columnIds, unique, type })
           }
           onRemoveIndex={(idxId) => removeIndex(tableId, idxId)}
         />
@@ -307,17 +298,6 @@ function TableConfigBody({
         }}
       />
     </Tabs>
-  );
-}
-
-function StatTile({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-md border bg-card p-2">
-      <p className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </p>
-      <p className="text-base font-semibold">{value}</p>
-    </div>
   );
 }
 
@@ -523,7 +503,12 @@ function IndexesTab({
   onRemoveIndex,
 }: {
   tableId: string;
-  onAddIndex: (name: string, columnIds: string[], unique: boolean) => void;
+  onAddIndex: (
+    name: string,
+    columnIds: string[],
+    unique: boolean,
+    type: IndexType
+  ) => void;
   onRemoveIndex: (idxId: string) => void;
 }) {
   const { schema } = useSchema();
@@ -531,6 +516,7 @@ function IndexesTab({
   const [draftName, setDraftName] = useState("");
   const [draftCols, setDraftCols] = useState<string[]>([]);
   const [draftUnique, setDraftUnique] = useState(false);
+  const [draftType, setDraftType] = useState<IndexType>("btree");
 
   if (!table) return null;
 
@@ -548,10 +534,11 @@ function IndexesTab({
       .map((id) => table.columns.find((c) => c.id === id)?.name)
       .filter((n): n is string => !!n);
     const name = draftName.trim() || `idx_${table.name}_${colNames.join("_")}`;
-    onAddIndex(name, draftCols, draftUnique);
+    onAddIndex(name, draftCols, draftUnique, draftType);
     setDraftName("");
     setDraftCols([]);
     setDraftUnique(false);
+    setDraftType("btree");
   };
 
   return (
@@ -567,7 +554,7 @@ function IndexesTab({
               className="flex items-center justify-between gap-2 rounded-lg border bg-card p-3"
             >
               <div className="min-w-0">
-                <div className="flex items-center gap-1.5 text-sm font-semibold">
+                <div className="flex flex-wrap items-center gap-1.5 text-sm font-semibold">
                   <Hash className="size-3.5 text-muted-foreground" />
                   {idx.name}
                   {idx.unique && (
@@ -575,6 +562,9 @@ function IndexesTab({
                       Unique
                     </span>
                   )}
+                  <span className="rounded bg-foreground/10 px-1.5 py-px text-[9px] font-bold uppercase tracking-wide text-muted-foreground">
+                    {(idx.type ?? "btree").toUpperCase()}
+                  </span>
                 </div>
                 <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
                   ({colNames.join(", ") || "—"})
@@ -645,6 +635,38 @@ function IndexesTab({
                     .join(" → ")}
                 </p>
               )}
+            </div>
+            <div className="grid gap-1">
+              <Label className="text-[10px] text-muted-foreground">
+                Index method
+              </Label>
+              <Select
+                value={draftType}
+                onValueChange={(v) => {
+                  if (v) setDraftType(v as IndexType);
+                }}
+              >
+                <SelectTrigger className="h-8 w-full text-xs">
+                  <SelectValue>
+                    {(value) =>
+                      value
+                        ? INDEX_TYPE_LABELS[value as IndexType]
+                        : "B-tree (default)"
+                    }
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {INDEX_TYPES.map((t) => (
+                    <SelectItem key={t} value={t}>
+                      {INDEX_TYPE_LABELS[t]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-muted-foreground">
+                Method maps to dialect: PG keeps the name; MySQL falls back
+                to BTREE/FULLTEXT/SPATIAL; SQLite ignores method.
+              </p>
             </div>
             <div className="flex items-center gap-2">
               <Button
@@ -841,7 +863,14 @@ function RelationshipsTab({
               </Label>
               <Select value={sourceCol} onValueChange={(v) => setSourceCol(v ?? "")}>
                 <SelectTrigger className="h-8 w-full text-xs">
-                  <SelectValue placeholder="Choose column" />
+                  <SelectValue placeholder="Choose column">
+                    {(value) => {
+                      const c = table.columns.find((x) => x.id === value);
+                      return c
+                        ? `${c.name} (${c.type.toLowerCase()})`
+                        : "Choose column";
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {table.columns.map((c) => (
@@ -867,7 +896,12 @@ function RelationshipsTab({
                 }}
               >
                 <SelectTrigger className="h-8 w-full text-xs">
-                  <SelectValue placeholder="Choose table" />
+                  <SelectValue placeholder="Choose table">
+                    {(value) => {
+                      const t = otherTables.find((x) => x.id === value);
+                      return t ? t.name : "Choose table";
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {otherTables.map((t) => (
@@ -887,7 +921,16 @@ function RelationshipsTab({
                 </Label>
                 <Select value={targetCol} onValueChange={(v) => setTargetCol(v ?? "")}>
                   <SelectTrigger className="h-8 w-full text-xs">
-                    <SelectValue placeholder="Choose column" />
+                    <SelectValue placeholder="Choose column">
+                      {(value) => {
+                        const c = targetTable.columns.find(
+                          (x) => x.id === value
+                        );
+                        return c
+                          ? `${c.name} (${c.type.toLowerCase()})`
+                          : "Choose column";
+                      }}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {targetTable.columns.map((c) => (

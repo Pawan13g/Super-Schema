@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useSession } from "next-auth/react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Logo } from "@/components/brand/logo";
@@ -812,9 +812,9 @@ function AppearanceTab() {
     >
       <div className="grid grid-cols-3 gap-3 sm:max-w-md">
         {[
-          { v: "light", label: "Light", icon: Sun, preview: "bg-white" },
-          { v: "dark", label: "Dark", icon: Moon, preview: "bg-zinc-900" },
-          { v: "system", label: "System", icon: Monitor, preview: "bg-gradient-to-br from-white to-zinc-900" },
+          { v: "light" as const, label: "Light", icon: Sun, preview: "bg-white" },
+          { v: "dark" as const, label: "Dark", icon: Moon, preview: "bg-zinc-900" },
+          { v: "system" as const, label: "System", icon: Monitor, preview: "bg-gradient-to-br from-white to-zinc-900" },
         ].map(({ v, label, icon: Icon, preview }) => {
           const active = theme === v || (theme === undefined && v === "system");
           return (
@@ -948,98 +948,7 @@ function ConnectionsTab({ profile }: { profile: ProfileData | null }) {
         </ul>
       </Section>
 
-      <Divider />
-
-      <Section
-        title="OAuth redirect URIs"
-        description="Whitelist these exact URLs in each provider's developer console. They're derived from the current origin so they stay correct on prod, preview, and localhost."
-      >
-        {!callbackInfo ? (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader size="xs" /> Loading
-          </div>
-        ) : (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between rounded-lg border bg-muted/30 px-3 py-2 text-xs">
-              <span className="text-muted-foreground">Detected origin</span>
-              <code className="font-mono text-foreground">
-                {callbackInfo.origin}
-              </code>
-            </div>
-            <ul className="space-y-2">
-              {callbackInfo.callbacks.map((cb) => (
-                <CallbackCard key={cb.provider} cb={cb} />
-              ))}
-            </ul>
-            <p className="text-[11px] text-muted-foreground">
-              See <Link href="/docs#auth" className="text-primary hover:underline">docs / Auth</Link> for full setup steps and required env vars.
-            </p>
-          </div>
-        )}
-      </Section>
     </>
   );
 }
 
-function CallbackCard({ cb }: { cb: CallbackEntry }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(cb.callbackUrl);
-      setCopied(true);
-      toast.success(`${cb.label} callback URL copied`);
-      setTimeout(() => setCopied(false), 2000);
-    } catch {
-      toast.error("Copy failed");
-    }
-  };
-
-  return (
-    <li className="rounded-xl border bg-muted/30 p-3">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <p className="text-sm font-medium">{cb.label}</p>
-          <span
-            className={cn(
-              "rounded-full px-1.5 py-0.5 text-[9px] font-semibold",
-              cb.enabled
-                ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"
-                : "bg-muted text-muted-foreground"
-            )}
-            title={cb.envVars.join(", ")}
-          >
-            {cb.enabled ? "Enabled" : "Env vars not set"}
-          </span>
-        </div>
-        <a
-          href={cb.consoleUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="inline-flex items-center gap-1 text-[11px] text-primary hover:underline"
-        >
-          Open console <ExternalLink className="size-3" />
-        </a>
-      </div>
-      <div className="mt-2 flex items-stretch gap-2">
-        <code className="flex-1 truncate rounded-md border bg-background px-2 py-1.5 font-mono text-[11px] text-foreground">
-          {cb.callbackUrl}
-        </code>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleCopy}
-          aria-label="Copy callback URL"
-        >
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-        </Button>
-      </div>
-      {cb.notes && (
-        <p className="mt-1.5 text-[11px] text-muted-foreground">{cb.notes}</p>
-      )}
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        Required env: <code>{cb.envVars.join(", ")}</code>
-      </p>
-    </li>
-  );
-}

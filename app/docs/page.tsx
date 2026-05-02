@@ -26,7 +26,7 @@ import {
   Workflow,
   Zap,
 } from "lucide-react";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 import { useSession } from "next-auth/react";
 import { Logo } from "@/components/brand/logo";
 import { cn } from "@/lib/utils";

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { useTheme } from "next-themes";
+import { useTheme } from "@/components/theme-provider";
 import {
   ReactFlow,
   Background,
@@ -48,6 +48,10 @@ import {
   ArrowRightLeft,
   Eye,
   LayoutGrid,
+  Lock,
+  LockOpen,
+  Maximize2,
+  Minus,
   Settings,
   Undo2,
   Redo2,
@@ -65,6 +69,7 @@ type MenuState =
 type ConfirmState =
   | { kind: "delete-table"; tableId: string }
   | { kind: "delete-relation"; relationId: string }
+  | { kind: "delete-many"; tableIds: string[] }
   | null;
 
 export function SchemaCanvas() {
@@ -80,6 +85,7 @@ export function SchemaCanvas() {
     addTable,
     addColumn,
     removeTable,
+    removeTables,
     removeRelation,
     createJunctionTable,
     duplicateTable,
@@ -131,6 +137,39 @@ export function SchemaCanvas() {
   useEffect(() => {
     selectedEdgeIdRef.current = selectedEdgeId;
   }, [selectedEdgeId]);
+  const [interactive, setInteractive] = useState(true);
+  // IDs of nodes currently in the React Flow multi-selection. Drives the
+  // bulk-action toolbar (Delete / Duplicate / Auto-arrange selected).
+  const [multiSelectedIds, setMultiSelectedIds] = useState<string[]>([]);
+  const multiSelectedIdsRef = useRef<string[]>([]);
+  useEffect(() => {
+    multiSelectedIdsRef.current = multiSelectedIds;
+  }, [multiSelectedIds]);
+
+  // Listen for cross-panel focus requests (Problems tab → highlight + center
+  // a table on the canvas). Fits the view on the target node so the user
+  // doesn't have to hunt for it manually.
+  useEffect(() => {
+    const onFocus = (e: Event) => {
+      const detail = (e as CustomEvent<{ tableId?: string }>).detail;
+      const tableId = detail?.tableId;
+      if (!tableId) return;
+      setSelectedTableId(tableId);
+      const inst = reactFlowInstanceRef.current;
+      if (!inst) return;
+      const node = inst.getNode(tableId);
+      if (!node) return;
+      inst.fitView({
+        nodes: [{ id: tableId }],
+        padding: 0.4,
+        duration: 400,
+        maxZoom: 1.5,
+      });
+    };
+    window.addEventListener("super-schema:focus-table", onFocus);
+    return () =>
+      window.removeEventListener("super-schema:focus-table", onFocus);
+  }, [setSelectedTableId]);
 
   const requestDeleteTable = useCallback((id: string) => {
     setConfirm({ kind: "delete-table", tableId: id });
@@ -175,9 +214,6 @@ export function SchemaCanvas() {
         });
       });
     });
-    toast.success(
-      `Arranged ${tables.length} table${tables.length === 1 ? "" : "s"}`
-    );
   }, [schema, setTablePositions]);
 
   // Sync schema → React Flow nodes. RF owns measured dimensions / drag
@@ -309,7 +345,7 @@ export function SchemaCanvas() {
         return;
       }
 
-      // Delete selected — edge first, then table
+      // Delete selected — edge first, then bulk-tables, then single-table
       if ((k === "delete" || k === "backspace") && !mod) {
         const edgeId = selectedEdgeIdRef.current;
         if (edgeId) {
@@ -317,7 +353,13 @@ export function SchemaCanvas() {
           setConfirm({ kind: "delete-relation", relationId: edgeId });
           return;
         }
-        const id = selectedTableIdRef.current;
+        const multi = multiSelectedIdsRef.current;
+        if (multi.length > 1) {
+          e.preventDefault();
+          setConfirm({ kind: "delete-many", tableIds: multi });
+          return;
+        }
+        const id = selectedTableIdRef.current ?? multi[0];
         if (!id) return;
         e.preventDefault();
         setConfirm({ kind: "delete-table", tableId: id });
@@ -438,25 +480,21 @@ export function SchemaCanvas() {
       labelStyle: {
         fontSize: 10,
         fontWeight: 700,
-        fill: isEdgeSelected ? "var(--color-primary)" : "var(--color-foreground)",
+        fill: "var(--color-foreground)",
       },
       labelBgStyle: {
         fill: "var(--color-background)",
-        stroke: isEdgeSelected
-          ? "var(--color-primary)"
-          : highlight
-            ? sourceColor
-            : "var(--color-border)",
+        stroke: highlight ? sourceColor : "var(--color-border)",
         strokeWidth: isEdgeSelected ? 2 : highlight ? 1.5 : 1,
       },
       labelBgPadding: [6, 3] as [number, number],
       labelBgBorderRadius: 6,
       markerEnd: {
         type: MarkerType.ArrowClosed,
-        color: isEdgeSelected ? "var(--color-primary)" : sourceColor,
+        color: sourceColor,
       },
       style: {
-        stroke: isEdgeSelected ? "var(--color-primary)" : sourceColor,
+        stroke: sourceColor,
         strokeWidth: isEdgeSelected ? 3.5 : highlight ? 3 : 1.75,
         opacity:
           selectedEdgeId !== null
@@ -467,7 +505,7 @@ export function SchemaCanvas() {
               ? 1
               : 0.35,
         filter: isEdgeSelected
-          ? "drop-shadow(0 0 8px var(--color-primary))"
+          ? `drop-shadow(0 0 10px ${sourceColor})`
           : highlight
             ? `drop-shadow(0 0 6px ${sourceColor}66)`
             : undefined,
@@ -781,6 +819,22 @@ export function SchemaCanvas() {
         onConfirm: () => removeTable(confirm.tableId),
       };
     }
+    if (confirm.kind === "delete-many") {
+      const ids = new Set(confirm.tableIds);
+      const dependent = schema.relations.filter(
+        (r) => ids.has(r.sourceTable) || ids.has(r.targetTable)
+      ).length;
+      return {
+        open: true,
+        title: `Delete ${confirm.tableIds.length} tables?`,
+        description: `Permanently removes ${confirm.tableIds.length} table${confirm.tableIds.length === 1 ? "" : "s"} and ${dependent} associated relation${dependent === 1 ? "" : "s"}. This cannot be undone.`,
+        confirmLabel: `Delete ${confirm.tableIds.length} tables`,
+        onConfirm: () => {
+          removeTables(confirm.tableIds);
+          setMultiSelectedIds([]);
+        },
+      };
+    }
     return {
       open: true,
       title: "Delete relation?",
@@ -829,6 +883,15 @@ export function SchemaCanvas() {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        nodesDraggable={interactive}
+        nodesConnectable={interactive}
+        elementsSelectable={interactive}
+        panOnDrag={interactive ? [1, 2] : false}
+        selectionOnDrag={interactive}
+        multiSelectionKeyCode={["Shift", "Meta", "Control"]}
+        zoomOnScroll={interactive}
+        zoomOnPinch={interactive}
+        zoomOnDoubleClick={interactive}
         onInit={(instance) => {
           reactFlowInstanceRef.current = instance;
         }}
@@ -839,6 +902,20 @@ export function SchemaCanvas() {
         onPaneClick={onPaneClick}
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}
+        onSelectionChange={({ nodes: selNodes }) => {
+          const next = selNodes.map((n) => n.id);
+          // Skip the setState if the array is structurally identical to the
+          // previous one — RF re-fires onSelectionChange on every render
+          // (because edges array changes), which without this guard creates
+          // an infinite loop with multiSelectedIds → new edges → new render.
+          setMultiSelectedIds((prev) => {
+            if (prev.length !== next.length) return next;
+            for (let i = 0; i < prev.length; i++) {
+              if (prev[i] !== next[i]) return next;
+            }
+            return prev;
+          });
+        }}
         onNodeContextMenu={onNodeContextMenu}
         onEdgeContextMenu={onEdgeContextMenu}
         onPaneContextMenu={onPaneContextMenu}
@@ -865,33 +942,106 @@ export function SchemaCanvas() {
           size={1}
           className="!opacity-60"
         />
-        <Controls className="!rounded-lg !border !border-border !bg-card !shadow-sm">
-          <Tip label="Undo (Ctrl+Z)" side="right">
-            <ControlButton
-              onClick={undo}
-              aria-label="Undo"
-              disabled={!canUndo}
-            >
-              <Undo2 />
-            </ControlButton>
+        <Controls
+          showZoom={false}
+          showFitView={false}
+          showInteractive={false}
+          className="!rounded-lg !border !border-border !bg-card !shadow-sm"
+        >
+          <Tip label="Zoom in (=)" side="right">
+            <span className="contents">
+              <ControlButton
+                onClick={() =>
+                  reactFlowInstanceRef.current?.zoomIn({ duration: 200 })
+                }
+                aria-label="Zoom in"
+              >
+                <Plus />
+              </ControlButton>
+            </span>
           </Tip>
-          <Tip label="Redo (Ctrl+Shift+Z)" side="right">
-            <ControlButton
-              onClick={redo}
-              aria-label="Redo"
-              disabled={!canRedo}
-            >
-              <Redo2 />
-            </ControlButton>
+          <Tip label="Zoom out (-)" side="right">
+            <span className="contents">
+              <ControlButton
+                onClick={() =>
+                  reactFlowInstanceRef.current?.zoomOut({ duration: 200 })
+                }
+                aria-label="Zoom out"
+              >
+                <Minus />
+              </ControlButton>
+            </span>
           </Tip>
-          <Tip label="Auto-arrange tables" side="right">
-            <ControlButton
-              onClick={autoArrange}
-              aria-label="Auto-arrange tables"
-              disabled={schema.tables.length === 0}
-            >
-              <LayoutGrid />
-            </ControlButton>
+          <Tip label="Fit view (F)" side="right">
+            <span className="contents">
+              <ControlButton
+                onClick={() =>
+                  reactFlowInstanceRef.current?.fitView({
+                    padding: 0.2,
+                    duration: 300,
+                  })
+                }
+                aria-label="Fit view"
+              >
+                <Maximize2 />
+              </ControlButton>
+            </span>
+          </Tip>
+          <Tip label={interactive ? "Lock canvas" : "Unlock canvas"} side="right">
+            <span className="contents">
+              <ControlButton
+                onClick={() => setInteractive((v) => !v)}
+                aria-label={interactive ? "Lock canvas" : "Unlock canvas"}
+              >
+                {interactive ? <LockOpen /> : <Lock />}
+              </ControlButton>
+            </span>
+          </Tip>
+          <Tip
+            label={canUndo ? "Undo (Ctrl+Z)" : "Nothing to undo"}
+            side="right"
+          >
+            <span className="contents">
+              <ControlButton
+                onClick={undo}
+                aria-label="Undo"
+                disabled={!canUndo}
+              >
+                <Undo2 />
+              </ControlButton>
+            </span>
+          </Tip>
+          <Tip
+            label={canRedo ? "Redo (Ctrl+Shift+Z)" : "Nothing to redo"}
+            side="right"
+          >
+            <span className="contents">
+              <ControlButton
+                onClick={redo}
+                aria-label="Redo"
+                disabled={!canRedo}
+              >
+                <Redo2 />
+              </ControlButton>
+            </span>
+          </Tip>
+          <Tip
+            label={
+              schema.tables.length === 0
+                ? "Add tables to auto-arrange"
+                : "Auto-arrange tables (Shift+L)"
+            }
+            side="right"
+          >
+            <span className="contents">
+              <ControlButton
+                onClick={autoArrange}
+                aria-label="Auto-arrange tables"
+                disabled={schema.tables.length === 0}
+              >
+                <LayoutGrid />
+              </ControlButton>
+            </span>
           </Tip>
         </Controls>
         {!isMobile && (
@@ -925,10 +1075,86 @@ export function SchemaCanvas() {
 
       {/* Hint pill — visible only when 2+ tables exist and no relations yet,
           nudges new users toward the drag-from-column flow. */}
-      {schema.tables.length >= 2 && schema.relations.length === 0 && (
-        <div className="pointer-events-none absolute right-3 top-3 z-5 flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[10px] font-medium text-violet-700 shadow-sm backdrop-blur-sm dark:text-violet-300">
-          <Link2 className="size-3" />
-          Drag from a column dot to link tables
+      {schema.tables.length >= 2 &&
+        schema.relations.length === 0 &&
+        multiSelectedIds.length < 2 && (
+          <div className="pointer-events-none absolute right-3 top-3 z-0 flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[10px] font-medium text-violet-700 shadow-sm backdrop-blur-sm dark:text-violet-300">
+            <Link2 className="size-3" />
+            Drag from a column dot to link tables
+          </div>
+        )}
+
+      {/* Bulk-action toolbar — appears whenever 2+ tables are selected (via
+          drag-select or shift-click). Floats top-center for easy reach. */}
+      {multiSelectedIds.length > 1 && (
+        <div className="pointer-events-auto absolute left-1/2 top-3 z-10 flex -translate-x-1/2 items-center gap-1 rounded-full border border-border bg-card/95 px-1.5 py-1 shadow-lg backdrop-blur">
+          <span className="px-2 text-[11px] font-semibold text-foreground">
+            {multiSelectedIds.length} selected
+          </span>
+          <span className="h-4 w-px bg-border" />
+          <Tip label="Auto-arrange selected" side="bottom">
+            <button
+              type="button"
+              onClick={() => {
+                const inst = reactFlowInstanceRef.current;
+                if (!inst) return;
+                inst.fitView({
+                  nodes: multiSelectedIds.map((id) => ({ id })),
+                  padding: 0.4,
+                  duration: 400,
+                  maxZoom: 1.5,
+                });
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <LayoutGrid className="size-3.5" />
+            </button>
+          </Tip>
+          <Tip label="Duplicate selected" side="bottom">
+            <button
+              type="button"
+              onClick={() => {
+                let n = 0;
+                for (const id of multiSelectedIds) {
+                  if (duplicateTable(id, { select: false })) n++;
+                }
+                if (n > 0)
+                  toast.success(`Duplicated ${n} table${n === 1 ? "" : "s"}`);
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Copy className="size-3.5" />
+            </button>
+          </Tip>
+          <Tip label="Clear selection" side="bottom">
+            <button
+              type="button"
+              onClick={() => {
+                const inst = reactFlowInstanceRef.current;
+                if (!inst) return;
+                inst.setNodes((ns) => ns.map((n) => ({ ...n, selected: false })));
+                setMultiSelectedIds([]);
+              }}
+              className="inline-flex size-7 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <Eye className="size-3.5" />
+            </button>
+          </Tip>
+          <span className="h-4 w-px bg-border" />
+          <Tip label="Delete selected" side="bottom">
+            <button
+              type="button"
+              onClick={() =>
+                setConfirm({
+                  kind: "delete-many",
+                  tableIds: multiSelectedIds,
+                })
+              }
+              className="inline-flex size-7 items-center justify-center rounded-full text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 className="size-3.5" />
+            </button>
+          </Tip>
         </div>
       )}
 

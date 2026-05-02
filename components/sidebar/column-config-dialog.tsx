@@ -20,7 +20,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Tip } from "@/components/ui/tip";
 import { useSchema } from "@/lib/schema-store";
 import {
   COLUMN_TYPES,
@@ -30,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import {
   ArrowRight,
+  Check,
   Columns3,
   KeyRound,
   Link2,
@@ -74,7 +74,7 @@ export function ColumnConfigDialog({
   const open = tableId !== null && columnId !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[90vh] max-h-[90vh] w-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:h-auto sm:max-h-[85vh] sm:w-[calc(100%-2rem)] sm:max-w-2xl">
+      <DialogContent className="flex h-[90vh] max-h-[90vh] w-[calc(100%-1rem)] flex-col gap-0 overflow-hidden p-0 sm:h-[min(85vh,720px)] sm:max-h-[85vh] sm:w-[calc(100%-2rem)] sm:max-w-2xl">
         <DialogHeader className="shrink-0 space-y-1 border-b p-4 pr-12 sm:p-5 sm:pr-12">
           <DialogTitle className="flex items-center gap-2">
             <Columns3 className="size-4" />
@@ -166,21 +166,23 @@ function ColumnConfigBody({
   };
 
   const togglePill = (constraint: ColumnConstraint) => {
+    if (!col) return;
     const active = col.constraints.includes(constraint);
     if (constraint === "REFERENCES" && !active) {
       onPickFk?.();
       return;
     }
-    const next = active
+    const nextConstraints: ColumnConstraint[] = active
       ? col.constraints.filter((c) => c !== constraint)
       : [...col.constraints, constraint];
-    const updates: { constraints: ColumnConstraint[]; references?: undefined } = {
-      constraints: next,
-    };
     if (constraint === "REFERENCES" && active) {
-      updates.references = undefined;
+      updateColumn(tableId, col.id, {
+        constraints: nextConstraints,
+        references: undefined,
+      });
+    } else {
+      updateColumn(tableId, col.id, { constraints: nextConstraints });
     }
-    updateColumn(tableId, col.id, updates);
   };
 
   const clearFk = () => {
@@ -268,29 +270,40 @@ function ColumnConfigBody({
                 (c === "REFERENCES" && isAi);
               const colorClass = active
                 ? color === "amber"
-                  ? "bg-amber-500/15 text-amber-700 ring-1 ring-amber-500/40 dark:text-amber-400"
+                  ? "bg-amber-500 text-amber-50 ring-1 ring-amber-500 shadow-sm"
                   : color === "cyan"
-                    ? "bg-cyan-500/15 text-cyan-700 ring-1 ring-cyan-500/40 dark:text-cyan-400"
-                    : "bg-violet-500/15 text-violet-700 ring-1 ring-violet-500/40 dark:text-violet-300"
-                : "border border-border bg-card text-muted-foreground hover:border-foreground/30 hover:text-foreground";
+                    ? "bg-cyan-500 text-cyan-50 ring-1 ring-cyan-500 shadow-sm"
+                    : "bg-violet-600 text-violet-50 ring-1 ring-violet-600 shadow-sm"
+                : "border border-border bg-card text-muted-foreground hover:border-foreground/30 hover:bg-muted/50 hover:text-foreground";
               return (
-                <Tip key={c} label={PILL_FULL[c]}>
-                  <button
-                    type="button"
-                    onClick={() => togglePill(c)}
-                    disabled={disabled}
+                <button
+                  key={c}
+                  type="button"
+                  title={PILL_FULL[c]}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    togglePill(c);
+                  }}
+                  disabled={disabled}
+                  data-active={active ? "" : undefined}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all",
+                    colorClass,
+                    disabled && "cursor-not-allowed opacity-40"
+                  )}
+                >
+                  {active && <Check className="size-3" />}
+                  {label}
+                  <span
                     className={cn(
-                      "rounded-md px-2.5 py-1 text-[11px] font-semibold transition-all",
-                      colorClass,
-                      disabled && "cursor-not-allowed opacity-40"
+                      "text-[9px] font-normal",
+                      active ? "opacity-90" : "opacity-70"
                     )}
                   >
-                    {label}
-                    <span className="ml-1 text-[9px] font-normal opacity-70">
-                      {PILL_FULL[c].split(" — ")[0]}
-                    </span>
-                  </button>
-                </Tip>
+                    {PILL_FULL[c].split(" — ")[0]}
+                  </span>
+                </button>
               );
             })}
           </div>

@@ -43,7 +43,7 @@ const PLACEHOLDER: Record<Dialect, string> = {
 };
 
 export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
-  const { activeProjectId, createSchemaInProject } = useWorkspace();
+  const { activeProjectId, createSchemaInProject, saveNow } = useWorkspace();
   const { replaceSchema } = useSchema();
 
   const [dialect, setDialect] = useState<Dialect>("postgresql");
@@ -107,9 +107,16 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
         toast.error("Failed to create schema");
         return;
       }
-      // createSchemaInProject already switched to the new schema; replace its
-      // canvas state with the introspected schema.
+      // createSchemaInProject already switched to the new schema (loading its
+      // empty schemaJson). Replace canvas state with the introspected schema,
+      // then force-flush the save so the import survives a reload — the
+      // debounced auto-save can be eaten by the load's skip-next-autosave
+      // flag, leaving only an empty schema on the server.
       replaceSchema(schema);
+      // Yield a tick so the schema-store state update commits before saveNow
+      // reads the schema via its ref.
+      await new Promise((r) => setTimeout(r, 0));
+      await saveNow();
       toast.success(
         `Imported ${schema.tables.length} table${schema.tables.length === 1 ? "" : "s"}`
       );

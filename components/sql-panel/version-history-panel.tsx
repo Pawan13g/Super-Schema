@@ -20,7 +20,10 @@ import {
   ArrowLeft,
   Clock,
   GitCompare,
+  Trash2,
+  Eraser,
 } from "lucide-react";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import type { Schema } from "@/lib/types";
 
@@ -49,6 +52,10 @@ export function VersionHistoryPanel() {
   const [diff, setDiff] = useState<SchemaDiff | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
 
+  // Delete confirms
+  const [deleteTarget, setDeleteTarget] = useState<VersionItem | null>(null);
+  const [confirmClearAll, setConfirmClearAll] = useState(false);
+
   const fetchVersions = useCallback(async () => {
     if (!activeSchemaId) return;
     setLoading(true);
@@ -66,6 +73,46 @@ export function VersionHistoryPanel() {
   useEffect(() => {
     fetchVersions();
   }, [fetchVersions]);
+
+  const handleDeleteOne = async (v: VersionItem) => {
+    if (!activeSchemaId) return;
+    try {
+      const res = await fetch(
+        `/api/schemas/${activeSchemaId}/versions/${v.id}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        toast.error("Failed to delete version");
+        return;
+      }
+      toast.success(`Deleted v${v.version}`);
+      await fetchVersions();
+    } catch {
+      toast.error("Failed to delete version");
+    }
+  };
+
+  const handleClearAll = async () => {
+    if (!activeSchemaId) return;
+    try {
+      const res = await fetch(`/api/schemas/${activeSchemaId}/versions`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        toast.error("Failed to clear history");
+        return;
+      }
+      const data = (await res.json()) as { deleted?: number };
+      toast.success(
+        data.deleted
+          ? `Cleared ${data.deleted} version${data.deleted === 1 ? "" : "s"}`
+          : "History cleared"
+      );
+      await fetchVersions();
+    } catch {
+      toast.error("Failed to clear history");
+    }
+  };
 
   const handleRestore = async (v: VersionItem) => {
     if (!activeSchemaId) return;
@@ -195,19 +242,30 @@ export function VersionHistoryPanel() {
             (current: v{currentVersion})
           </span>
         </div>
-        <Button
-          variant="ghost"
-          size="icon-xs"
-          onClick={fetchVersions}
-          disabled={loading}
-          title="Refresh"
-        >
-          <RotateCcw className={cn("size-3", loading && "animate-spin")} />
-        </Button>
+        <div className="flex items-center gap-0.5">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={fetchVersions}
+            disabled={loading}
+            title="Refresh"
+          >
+            <RotateCcw className={cn("size-3", loading && "animate-spin")} />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            onClick={() => setConfirmClearAll(true)}
+            disabled={loading || versions.length === 0}
+            title="Clear all history"
+          >
+            <Eraser className="size-3 text-muted-foreground" />
+          </Button>
+        </div>
       </div>
 
       {/* Version list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {loading && versions.length === 0 ? (
           <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
             Loading versions...
@@ -312,6 +370,16 @@ export function VersionHistoryPanel() {
                     >
                       <RotateCcw className="size-3" />
                     </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => setDeleteTarget(v)}
+                      title="Delete this version"
+                      disabled={isLatest}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="size-3" />
+                    </Button>
                   </div>
                 </div>
               );
@@ -319,6 +387,32 @@ export function VersionHistoryPanel() {
           </div>
         )}
       </ScrollArea>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setDeleteTarget(null);
+        }}
+        title={
+          deleteTarget
+            ? `Delete version v${deleteTarget.version}?`
+            : "Delete version?"
+        }
+        description="Removes this snapshot from history. The current canvas is untouched. Cannot be undone."
+        confirmLabel="Delete version"
+        onConfirm={() => {
+          if (deleteTarget) void handleDeleteOne(deleteTarget);
+        }}
+      />
+
+      <ConfirmDialog
+        open={confirmClearAll}
+        onOpenChange={setConfirmClearAll}
+        title="Clear all version history?"
+        description={`Permanently removes ${versions.length} snapshot${versions.length === 1 ? "" : "s"} for this schema. The current canvas is untouched. Cannot be undone.`}
+        confirmLabel="Clear history"
+        onConfirm={() => void handleClearAll()}
+      />
     </div>
   );
 }
@@ -379,7 +473,7 @@ function DiffView({
         )}
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         {loading ? (
           <div className="flex items-center justify-center py-12 text-xs text-muted-foreground">
             Computing diff...

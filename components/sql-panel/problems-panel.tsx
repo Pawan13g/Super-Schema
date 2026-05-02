@@ -41,6 +41,17 @@ const SEVERITY_CONFIG: Record<
 
 export function ProblemsPanel() {
   const { schema, setSelectedTableId } = useSchema();
+
+  // Select table + ask the canvas to fit-view on it. Schema-canvas listens
+  // for this event so we can stay decoupled from the React Flow instance.
+  const focusTable = (tableId: string | null | undefined) => {
+    setSelectedTableId(tableId ?? null);
+    if (tableId && typeof window !== "undefined") {
+      window.dispatchEvent(
+        new CustomEvent("super-schema:focus-table", { detail: { tableId } })
+      );
+    }
+  };
   const issues = useMemo(() => lintSchema(schema), [schema]);
   const summary = summarizeIssues(issues);
   const [filterSeverity, setFilterSeverity] = useState<LintSeverity | "all">("all");
@@ -162,7 +173,7 @@ export function ProblemsPanel() {
       </div>
 
       {/* Issues list */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="min-h-0 flex-1">
         <div className="font-mono text-xs">
           {/* General issues (no table) */}
           {grouped.general.map((issue) => (
@@ -180,7 +191,10 @@ export function ProblemsPanel() {
               <div key={tableId}>
                 <button
                   type="button"
-                  onClick={() => toggleTable(tableId)}
+                  onClick={() => {
+                    toggleTable(tableId);
+                    focusTable(tableId);
+                  }}
                   className="flex w-full items-center gap-1.5 bg-muted/30 px-3 py-1 text-left hover:bg-muted/60"
                 >
                   {isCollapsed ? (
@@ -215,7 +229,7 @@ export function ProblemsPanel() {
                     <IssueRow
                       key={issue.id}
                       issue={issue}
-                      onNavigate={() => setSelectedTableId(issue.tableId ?? null)}
+                      onNavigate={() => focusTable(issue.tableId ?? null)}
                     />
                   ))}
               </div>
