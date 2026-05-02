@@ -36,7 +36,6 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AddRelationDialog } from "./add-relation-dialog";
 import { RelationTypeDialog } from "./relation-type-dialog";
-import { Button } from "@/components/ui/button";
 import { Tip } from "@/components/ui/tip";
 import { TableConfigDialog } from "@/components/workspace/table-config-dialog";
 import { Loader } from "@/components/ui/loader";
@@ -127,6 +126,11 @@ export function SchemaCanvas() {
     targetColumnId: string;
   } | null>(null);
   const [configTableId, setConfigTableId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
+  const selectedEdgeIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedEdgeIdRef.current = selectedEdgeId;
+  }, [selectedEdgeId]);
 
   const requestDeleteTable = useCallback((id: string) => {
     setConfirm({ kind: "delete-table", tableId: id });
@@ -305,8 +309,14 @@ export function SchemaCanvas() {
         return;
       }
 
-      // Delete selected
+      // Delete selected — edge first, then table
       if ((k === "delete" || k === "backspace") && !mod) {
+        const edgeId = selectedEdgeIdRef.current;
+        if (edgeId) {
+          e.preventDefault();
+          setConfirm({ kind: "delete-relation", relationId: edgeId });
+          return;
+        }
         const id = selectedTableIdRef.current;
         if (!id) return;
         e.preventDefault();
@@ -314,9 +324,73 @@ export function SchemaCanvas() {
         return;
       }
 
+      // Auto-arrange (Shift+L)
+      if (e.shiftKey && k === "l" && !mod) {
+        e.preventDefault();
+        autoArrange();
+        return;
+      }
+
+      // Fit-to-view (F)
+      if (k === "f" && !mod && !e.shiftKey) {
+        const inst = reactFlowInstanceRef.current;
+        if (!inst) return;
+        e.preventDefault();
+        inst.fitView({ padding: 0.2, duration: 300 });
+        return;
+      }
+
+      // Zoom in / out (= / -)
+      if ((k === "=" || k === "+") && !mod) {
+        const inst = reactFlowInstanceRef.current;
+        if (!inst) return;
+        e.preventDefault();
+        inst.zoomIn({ duration: 200 });
+        return;
+      }
+      if (k === "-" && !mod) {
+        const inst = reactFlowInstanceRef.current;
+        if (!inst) return;
+        e.preventDefault();
+        inst.zoomOut({ duration: 200 });
+        return;
+      }
+
+      // Rename selected table (R)
+      if (k === "r" && !mod && selectedTableIdRef.current) {
+        e.preventDefault();
+        const t = schema.tables.find(
+          (x) => x.id === selectedTableIdRef.current
+        );
+        if (!t) return;
+        const next = window.prompt("New table name", t.name)?.trim();
+        if (next && next !== t.name) updateTableName(t.id, next);
+        return;
+      }
+
+      // Add column to selected table (Shift+C)
+      if (e.shiftKey && k === "c" && !mod && selectedTableIdRef.current) {
+        e.preventDefault();
+        addColumn(selectedTableIdRef.current);
+        return;
+      }
+
+      // Open relation dialog from selected table (Shift+R)
+      if (e.shiftKey && k === "r" && !mod) {
+        e.preventDefault();
+        if (schema.tables.length < 2) {
+          toast.error("Add at least 2 tables first");
+          return;
+        }
+        setRelationDialogSource(selectedTableIdRef.current ?? undefined);
+        setRelationDialogOpen(true);
+        return;
+      }
+
       // Escape — clear selection / close menus
       if (k === "escape") {
         setSelectedTableId(null);
+        setSelectedEdgeId(null);
         setMenu(null);
         return;
       }
@@ -328,19 +402,24 @@ export function SchemaCanvas() {
     redo,
     saveNow,
     addTable,
+    addColumn,
     duplicateTable,
     insertTable,
     schema.tables,
     setSelectedTableId,
+    autoArrange,
+    updateTableName,
   ]);
 
   const edges: Edge[] = schema.relations.map((rel) => {
     const sourceTable = schema.tables.find((t) => t.id === rel.sourceTable);
     const sourceColor = sourceTable?.color ?? "var(--color-muted-foreground)";
+    const isEdgeSelected = selectedEdgeId === rel.id;
     // Highlight any edge attached to the currently selected table.
     const touchesSelected =
       selectedTableId !== null &&
       (rel.sourceTable === selectedTableId || rel.targetTable === selectedTableId);
+    const highlight = isEdgeSelected || touchesSelected;
     return {
       id: rel.id,
       source: rel.sourceTable,
@@ -349,6 +428,7 @@ export function SchemaCanvas() {
       targetHandle: `${rel.targetColumn}-target-left`,
       type: "smoothstep",
       animated: true,
+      selected: isEdgeSelected,
       label:
         rel.type === "one-to-many"
           ? "1:N"
@@ -358,26 +438,40 @@ export function SchemaCanvas() {
       labelStyle: {
         fontSize: 10,
         fontWeight: 700,
-        fill: "var(--color-foreground)",
+        fill: isEdgeSelected ? "var(--color-primary)" : "var(--color-foreground)",
       },
       labelBgStyle: {
         fill: "var(--color-background)",
-        stroke: touchesSelected ? sourceColor : "var(--color-border)",
-        strokeWidth: touchesSelected ? 1.5 : 1,
+        stroke: isEdgeSelected
+          ? "var(--color-primary)"
+          : highlight
+            ? sourceColor
+            : "var(--color-border)",
+        strokeWidth: isEdgeSelected ? 2 : highlight ? 1.5 : 1,
       },
       labelBgPadding: [6, 3] as [number, number],
       labelBgBorderRadius: 6,
-      markerEnd: { type: MarkerType.ArrowClosed, color: sourceColor },
-      // RF supports `selected` — bumps stroke + glows when user clicks the edge.
-      style: {
-        stroke: sourceColor,
-        strokeWidth: touchesSelected ? 3 : 1.75,
-        opacity: selectedTableId === null || touchesSelected ? 1 : 0.35,
-        filter: touchesSelected
-          ? `drop-shadow(0 0 6px ${sourceColor}66)`
-          : undefined,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: isEdgeSelected ? "var(--color-primary)" : sourceColor,
       },
-      // RF default selected style: bumps to 4px and uses a brighter stroke.
+      style: {
+        stroke: isEdgeSelected ? "var(--color-primary)" : sourceColor,
+        strokeWidth: isEdgeSelected ? 3.5 : highlight ? 3 : 1.75,
+        opacity:
+          selectedEdgeId !== null
+            ? isEdgeSelected
+              ? 1
+              : 0.3
+            : selectedTableId === null || touchesSelected
+              ? 1
+              : 0.35,
+        filter: isEdgeSelected
+          ? "drop-shadow(0 0 8px var(--color-primary))"
+          : highlight
+            ? `drop-shadow(0 0 6px ${sourceColor}66)`
+            : undefined,
+      },
       selectable: true,
     };
   });
@@ -497,8 +591,22 @@ export function SchemaCanvas() {
 
   const onPaneClick = useCallback(() => {
     setSelectedTableId(null);
+    setSelectedEdgeId(null);
     setMenu(null);
   }, [setSelectedTableId]);
+
+  const onEdgeClick = useCallback(
+    (e: React.MouseEvent, edge: Edge) => {
+      e.stopPropagation();
+      setSelectedEdgeId(edge.id);
+      setSelectedTableId(null);
+    },
+    [setSelectedTableId]
+  );
+
+  const onNodeClick = useCallback(() => {
+    setSelectedEdgeId(null);
+  }, []);
 
   // Context menu wiring
   const onNodeContextMenu = useCallback(
@@ -534,7 +642,7 @@ export function SchemaCanvas() {
       if (!table) return [];
       return [
         {
-          label: "Configure table…",
+          label: "Configure table",
           icon: <Settings className="size-3" />,
           onClick: () => setConfigTableId(table.id),
         },
@@ -553,7 +661,7 @@ export function SchemaCanvas() {
           onClick: () => addColumn(table.id),
         },
         {
-          label: "Add relation from here…",
+          label: "Add relation from here",
           icon: <Link2 className="size-3" />,
           onClick: () => {
             setRelationDialogSource(table.id);
@@ -634,7 +742,7 @@ export function SchemaCanvas() {
           onClick: () => addTable(`table_${schema.tables.length + 1}`),
         },
         {
-          label: "Add relation…",
+          label: "Add relation",
           icon: <Link2 className="size-3" />,
           onClick: () => {
             setRelationDialogSource(undefined);
@@ -729,6 +837,8 @@ export function SchemaCanvas() {
         onNodeDragStop={onNodeDragStop}
         onConnect={onConnect}
         onPaneClick={onPaneClick}
+        onEdgeClick={onEdgeClick}
+        onNodeClick={onNodeClick}
         onNodeContextMenu={onNodeContextMenu}
         onEdgeContextMenu={onEdgeContextMenu}
         onPaneContextMenu={onPaneContextMenu}
@@ -808,34 +918,19 @@ export function SchemaCanvas() {
         <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-2 rounded-lg border bg-card px-4 py-3 shadow-sm">
             <Loader />
-            <p className="text-xs text-muted-foreground">Loading workspace…</p>
+            <p className="text-xs text-muted-foreground">Loading workspace</p>
           </div>
         </div>
       )}
 
-      {/* Floating toolbar — top right */}
-      <div className="pointer-events-none absolute right-3 top-3 z-5 flex gap-1.5">
-        <Tip
-          label={
-            schema.tables.length < 2
-              ? "Add at least 2 tables first"
-              : "Create a foreign-key relation"
-          }
-        >
-          <Button
-            size="sm"
-            onClick={() => {
-              setRelationDialogSource(undefined);
-              setRelationDialogOpen(true);
-            }}
-            disabled={schema.tables.length < 2}
-            className="pointer-events-auto h-7 gap-1 bg-violet-600 px-2.5 text-white shadow-sm hover:bg-violet-700 disabled:bg-muted disabled:text-muted-foreground"
-          >
-            <Link2 className="size-3" />
-            <span className="hidden text-xs font-medium sm:inline">Add Relation</span>
-          </Button>
-        </Tip>
-      </div>
+      {/* Hint pill — visible only when 2+ tables exist and no relations yet,
+          nudges new users toward the drag-from-column flow. */}
+      {schema.tables.length >= 2 && schema.relations.length === 0 && (
+        <div className="pointer-events-none absolute right-3 top-3 z-5 flex items-center gap-1.5 rounded-full border border-violet-500/30 bg-violet-500/10 px-2.5 py-1 text-[10px] font-medium text-violet-700 shadow-sm backdrop-blur-sm dark:text-violet-300">
+          <Link2 className="size-3" />
+          Drag from a column dot to link tables
+        </div>
+      )}
 
       {menu && (
         <ContextMenu

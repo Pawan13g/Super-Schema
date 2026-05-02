@@ -26,9 +26,11 @@ import { cn } from "@/lib/utils";
 import {
   ArrowUpDown,
   Clock,
+  Eye,
   FileText,
   FolderOpen,
   Grid3x3,
+  Info,
   List,
   MoreHorizontal,
   Pencil,
@@ -75,6 +77,7 @@ export function ProjectsDialog({ open, onOpenChange }: ProjectsDialogProps) {
   const [renameDraft, setRenameDraft] = useState("");
   const [renameDescDraft, setRenameDescDraft] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<ProjectMeta | null>(null);
 
   const [query, setQuery] = useState("");
   const [view, setView] = useState<ViewMode>("grid");
@@ -210,7 +213,7 @@ export function ProjectsDialog({ open, onOpenChange }: ProjectsDialogProps) {
             <div className="relative max-w-sm flex-1">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
               <Input
-                placeholder="Search projects…"
+                placeholder="Search projects"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 className="h-8 rounded-md bg-muted/40 pl-8 text-xs"
@@ -322,6 +325,7 @@ export function ProjectsDialog({ open, onOpenChange }: ProjectsDialogProps) {
                       setRenameDraft(p.name);
                       setRenameDescDraft(p.description ?? "");
                     }}
+                    onView={() => setDetailsTarget(p)}
                     onDelete={() => setConfirmDeleteId(p.id)}
                   />
                 ))}
@@ -353,6 +357,7 @@ export function ProjectsDialog({ open, onOpenChange }: ProjectsDialogProps) {
                       setRenameDraft(p.name);
                       setRenameDescDraft(p.description ?? "");
                     }}
+                    onView={() => setDetailsTarget(p)}
                     onDelete={() => setConfirmDeleteId(p.id)}
                   />
                 ))}
@@ -479,7 +484,95 @@ export function ProjectsDialog({ open, onOpenChange }: ProjectsDialogProps) {
           if (confirmDeleteId) deleteProject(confirmDeleteId);
         }}
       />
+
+      {/* View details */}
+      <Dialog
+        open={detailsTarget !== null}
+        onOpenChange={(o) => {
+          if (!o) setDetailsTarget(null);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Info className="size-4" />
+              {detailsTarget?.name ?? "Project"}
+            </DialogTitle>
+            <DialogDescription>Project details and metadata.</DialogDescription>
+          </DialogHeader>
+          {detailsTarget && (
+            <div className="grid gap-3 py-1 text-sm">
+              <DetailRow label="Name">{detailsTarget.name}</DetailRow>
+              <DetailRow label="Description">
+                {detailsTarget.description?.trim() || (
+                  <span className="italic text-muted-foreground/60">None</span>
+                )}
+              </DetailRow>
+              <DetailRow label="Schemas">
+                {detailsTarget._count?.schemas ?? 0}
+              </DetailRow>
+              <DetailRow label="Created">
+                {formatDate(detailsTarget.createdAt)}
+              </DetailRow>
+              <DetailRow label="Last updated">
+                {formatDate(detailsTarget.updatedAt)}
+              </DetailRow>
+              <DetailRow label="ID">
+                <code className="font-mono text-[11px] text-muted-foreground">
+                  {detailsTarget.id}
+                </code>
+              </DetailRow>
+            </div>
+          )}
+          <div className="flex justify-end gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (detailsTarget) {
+                  const t = detailsTarget;
+                  setDetailsTarget(null);
+                  setRenameTarget(t);
+                  setRenameDraft(t.name);
+                  setRenameDescDraft(t.description ?? "");
+                }
+              }}
+            >
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+            <Button
+              onClick={() => {
+                if (detailsTarget) {
+                  void openProject(detailsTarget.id);
+                  setDetailsTarget(null);
+                }
+              }}
+              disabled={detailsTarget?.id === activeProjectId}
+            >
+              <FolderOpen className="size-3.5" />
+              Open project
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+function DetailRow({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="grid grid-cols-[110px_1fr] items-baseline gap-3 border-b border-border/50 pb-2 last:border-b-0 last:pb-0">
+      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="min-w-0 break-words text-foreground">{children}</span>
+    </div>
   );
 }
 
@@ -488,12 +581,14 @@ function ProjectCard({
   isActive,
   onOpen,
   onRename,
+  onView,
   onDelete,
 }: {
   project: ProjectMeta;
   isActive: boolean;
   onOpen: () => void;
   onRename: () => void;
+  onView: () => void;
   onDelete: () => void;
 }) {
   const schemaCount = project._count?.schemas ?? 0;
@@ -522,41 +617,13 @@ function ProjectCard({
               active
             </span>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <button
-                  type="button"
-                  onClick={(e) => e.stopPropagation()}
-                  className="rounded-md p-1 text-muted-foreground opacity-0 transition-opacity outline-none group-hover:opacity-100 data-[popup-open]:opacity-100 hover:bg-muted focus-visible:opacity-100"
-                />
-              }
-            >
-              <MoreHorizontal className="size-4" />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" sideOffset={4}>
-              <DropdownMenuItem
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onRename();
-                }}
-              >
-                <Pencil />
-                Rename
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                destructive
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onDelete();
-                }}
-              >
-                <Trash2 />
-                Delete
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <ProjectActionsMenu
+            isActive={isActive}
+            onOpen={onOpen}
+            onView={onView}
+            onRename={onRename}
+            onDelete={onDelete}
+          />
         </div>
       </div>
 
@@ -594,12 +661,14 @@ function ProjectRow({
   isActive,
   onOpen,
   onRename,
+  onView,
   onDelete,
 }: {
   project: ProjectMeta;
   isActive: boolean;
   onOpen: () => void;
   onRename: () => void;
+  onView: () => void;
   onDelete: () => void;
 }) {
   const schemaCount = project._count?.schemas ?? 0;
@@ -643,41 +712,85 @@ function ProjectRow({
       <span className="text-xs text-muted-foreground">
         {formatDate(project.updatedAt)}
       </span>
-      <DropdownMenu>
-        <DropdownMenuTrigger
-          render={
-            <button
-              type="button"
-              onClick={(e) => e.stopPropagation()}
-              className="rounded-md p-1 text-muted-foreground opacity-0 outline-none group-hover:opacity-100 data-[popup-open]:opacity-100 hover:bg-muted"
-            />
-          }
-        >
-          <MoreHorizontal className="size-4" />
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={4}>
-          <DropdownMenuItem
-            onClick={(e) => {
-              e.stopPropagation();
-              onRename();
-            }}
-          >
-            <Pencil />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            destructive
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete();
-            }}
-          >
-            <Trash2 />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+      <ProjectActionsMenu
+        isActive={isActive}
+        onOpen={onOpen}
+        onView={onView}
+        onRename={onRename}
+        onDelete={onDelete}
+      />
     </div>
+  );
+}
+
+function ProjectActionsMenu({
+  isActive,
+  onOpen,
+  onView,
+  onRename,
+  onDelete,
+}: {
+  isActive: boolean;
+  onOpen: () => void;
+  onView: () => void;
+  onRename: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label="Project actions"
+            onClick={(e) => e.stopPropagation()}
+            className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-opacity hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground data-[popup-open]:opacity-100 focus-visible:opacity-100 sm:opacity-0 sm:group-hover:opacity-100"
+          >
+            <MoreHorizontal className="size-4" />
+          </button>
+        }
+      />
+      <DropdownMenuContent align="end" sideOffset={4} className="min-w-[180px]">
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onOpen();
+          }}
+          disabled={isActive}
+        >
+          <FolderOpen />
+          {isActive ? "Already open" : "Open project"}
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onView();
+          }}
+        >
+          <Eye />
+          View details
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          onClick={(e) => {
+            e.stopPropagation();
+            onRename();
+          }}
+        >
+          <Pencil />
+          Edit name &amp; description
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          destructive
+          onClick={(e) => {
+            e.stopPropagation();
+            onDelete();
+          }}
+        >
+          <Trash2 />
+          Delete project
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

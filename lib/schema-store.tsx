@@ -35,6 +35,14 @@ interface SchemaStore {
   addColumn: (tableId: string) => void;
   removeColumn: (tableId: string, columnId: string) => void;
   updateColumn: (tableId: string, columnId: string, updates: Partial<Column>) => void;
+  // Reorder a column inside the same table. `position` is "before" or "after"
+  // the target column. No-op if same id or unknown ids.
+  reorderColumn: (
+    tableId: string,
+    sourceColumnId: string,
+    targetColumnId: string,
+    position: "before" | "after"
+  ) => void;
   addIndex: (tableId: string, index: Omit<TableIndex, "id">) => void;
   removeIndex: (tableId: string, indexId: string) => void;
   updateTableComment: (tableId: string, comment: string) => void;
@@ -295,6 +303,36 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
               }
             : t
         ),
+      }));
+    },
+    []
+  );
+
+  const reorderColumn = useCallback(
+    (
+      tableId: string,
+      sourceColumnId: string,
+      targetColumnId: string,
+      position: "before" | "after"
+    ) => {
+      if (sourceColumnId === targetColumnId) return;
+      setSchema((prev) => ({
+        ...prev,
+        tables: prev.tables.map((t) => {
+          if (t.id !== tableId) return t;
+          const fromIdx = t.columns.findIndex((c) => c.id === sourceColumnId);
+          const toIdx = t.columns.findIndex((c) => c.id === targetColumnId);
+          if (fromIdx === -1 || toIdx === -1) return t;
+          const next = [...t.columns];
+          const [moved] = next.splice(fromIdx, 1);
+          // After splice the target index may have shifted by one if it was
+          // after the source.
+          let insertAt = next.findIndex((c) => c.id === targetColumnId);
+          if (insertAt === -1) return t;
+          if (position === "after") insertAt += 1;
+          next.splice(insertAt, 0, moved);
+          return { ...t, columns: next };
+        }),
       }));
     },
     []
@@ -607,6 +645,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         addColumn,
         removeColumn,
         updateColumn,
+        reorderColumn,
         addIndex,
         removeIndex,
         updateTableComment,

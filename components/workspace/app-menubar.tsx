@@ -169,24 +169,24 @@ export function AppMenubar({
           <MenubarSeparator />
           <MenubarItem onClick={onOpenTemplates}>
             <LayoutTemplate />
-            Templates library…
+            Templates library
           </MenubarItem>
           <MenubarItem onClick={onImportCsv}>
             <FileSpreadsheet />
-            Import CSV as table…
+            Import CSV as table
           </MenubarItem>
           <MenubarItem onClick={onConnectDb}>
             <Plug />
-            Connect to live DB…
+            Connect to live DB
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem onClick={onOpenProjects}>
             <LayoutDashboard />
-            Projects…
+            Projects
           </MenubarItem>
           <MenubarItem onClick={onOpenTrash}>
             <Trash />
-            Trash bin…
+            Trash bin
           </MenubarItem>
           <MenubarItem render={<Link href="/settings" />}>
             <Settings />
@@ -217,7 +217,7 @@ export function AppMenubar({
             disabled={schema.tables.length < 2}
           >
             <Link2 />
-            Add relation…
+            Add relation
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem
@@ -296,7 +296,7 @@ export function AppMenubar({
               <MenubarGroup>
                 <MenubarLabel>{activeSchema.name}</MenubarLabel>
                 <MenubarItem onClick={onRenameSchema}>
-                  Rename schema…
+                  Rename schema
                 </MenubarItem>
                 <MenubarItem onClick={handleDuplicateSchema}>
                   <Copy />
@@ -317,24 +317,24 @@ export function AppMenubar({
           <MenubarSeparator />
           <MenubarItem onClick={onDocGen}>
             <Sparkles />
-            AI doc-gen…
+            AI doc-gen
           </MenubarItem>
           <MenubarItem onClick={onIndexAdvisor}>
             <Zap />
-            Index advisor…
+            Index advisor
           </MenubarItem>
           <MenubarItem onClick={onShareSchema}>
             <Share2 />
-            Share read-only…
+            Share read-only
           </MenubarItem>
           <MenubarSeparator />
           <MenubarItem onClick={onOpenReviews}>
             <GitPullRequest />
-            Schema reviews…
+            Schema reviews
           </MenubarItem>
           <MenubarItem onClick={onCompareSchemas}>
             <GitCompare />
-            Compare schemas…
+            Compare schemas
           </MenubarItem>
           {schemas.length > 0 ? (
             <>
@@ -414,7 +414,7 @@ export function AppMenubar({
               <MenubarSeparator />
               <MenubarItem onClick={onOpenProjects}>
                 <ExternalLink />
-                Manage projects…
+                Manage projects
               </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>

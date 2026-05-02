@@ -266,7 +266,7 @@ export function CompareSchemasDialog({
               <GitCompare className="size-8 text-muted-foreground/30" />
               <p>
                 {comparing
-                  ? "Comparing schemas…"
+                  ? "Comparing schemas"
                   : leftId === rightId && leftId
                     ? "Pick two different schemas"
                     : "Select two schemas and click Compare"}
@@ -364,7 +364,7 @@ function SchemaPicker({
         disabled={loading}
       >
         <SelectTrigger className="w-full">
-          <SelectValue placeholder={loading ? "Loading…" : "Pick a schema"} />
+          <SelectValue placeholder={loading ? "Loading" : "Pick a schema"} />
         </SelectTrigger>
         <SelectContent>
           {grouped.length === 0 ? (

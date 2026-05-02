@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -46,25 +47,42 @@ export function WorkspaceSwitcher() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(
+    null
+  );
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   const active = workspaces.find((w) => w.id === activeWorkspaceId);
 
   useEffect(() => {
     if (!open) return;
     const handleClick = (e: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
+      const t = e.target as Node;
+      if (btnRef.current?.contains(t)) return;
+      if (menuRef.current?.contains(t)) return;
+      setOpen(false);
     };
     const handleKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpen(false);
     };
+    const update = () => {
+      if (!btnRef.current) return;
+      const r = btnRef.current.getBoundingClientRect();
+      setAnchor({ left: r.left, top: r.bottom + 4 });
+    };
+    update();
     document.addEventListener("mousedown", handleClick);
     document.addEventListener("keydown", handleKey);
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
     return () => {
       document.removeEventListener("mousedown", handleClick);
       document.removeEventListener("keydown", handleKey);
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
     };
   }, [open]);
 
@@ -86,8 +104,9 @@ export function WorkspaceSwitcher() {
 
   return (
     <>
-      <div className="relative" ref={dropdownRef}>
+      <div className="relative">
         <button
+          ref={btnRef}
           onClick={() => setOpen((v) => !v)}
           disabled={loading}
           className="flex h-7 items-center gap-2 rounded-lg border border-transparent px-2 text-sm font-medium hover:border-border hover:bg-accent disabled:opacity-50"
@@ -108,8 +127,12 @@ export function WorkspaceSwitcher() {
           <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
         </button>
 
-        {open && (
-          <div className="absolute left-0 top-9 z-50 min-w-[240px] rounded-xl border bg-popover p-1.5 shadow-xl">
+        {mounted && open && anchor && createPortal(
+          <div
+            ref={menuRef}
+            style={{ position: "fixed", left: anchor.left, top: anchor.top }}
+            className="z-[100] min-w-[240px] rounded-xl border bg-popover p-1.5 shadow-xl"
+          >
             <p className="px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
               Workspaces
             </p>
@@ -192,7 +215,8 @@ export function WorkspaceSwitcher() {
               <Plus className="size-3.5" />
               New workspace
             </button>
-          </div>
+          </div>,
+          document.body
         )}
       </div>
 
@@ -235,7 +259,7 @@ export function WorkspaceSwitcher() {
 }
 
 function SaveIndicator({ status }: { status: "idle" | "saving" | "saved" | "error" }) {
-  if (status === "saving") return <span title="Saving…"><Loader size="xs" /></span>;
+  if (status === "saving") return <span title="Saving"><Loader size="xs" /></span>;
   if (status === "saved") return <span title="Saved"><CheckCircle2 className="size-3 text-emerald-500" /></span>;
   if (status === "error") return <span title="Save failed"><CloudOff className="size-3 text-destructive" /></span>;
   return <span title="In sync"><Cloud className="size-3 text-muted-foreground/30" /></span>;

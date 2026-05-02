@@ -74,7 +74,7 @@ export default function SignUpPage() {
       return;
     }
 
-    toast.success("Account created — signing you in…");
+    toast.success("Account created — signing you in");
     if (typeof window !== "undefined") {
       sessionStorage.setItem("super-schema:welcome-toast", "1");
     }

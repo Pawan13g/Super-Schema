@@ -25,7 +25,7 @@ export function CommentPopover({
   comment,
   onSave,
   label,
-  placeholder = "Write a short note…",
+  placeholder = "Write a short note",
   trigger,
 }: CommentPopoverProps) {
   const [open, setOpen] = useState(false);

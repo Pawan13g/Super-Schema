@@ -46,15 +46,15 @@ import { OnboardingLauncher } from "@/components/workspace/onboarding-launcher";
 import { SaveStatusBadge } from "@/components/workspace/save-status-badge";
 import { CollabToggle } from "@/components/workspace/collab-toggle";
 import { LocalModeBadge } from "@/components/workspace/local-mode-badge";
-import { CommandPalette } from "@/components/workspace/command-palette";
-import { ShortcutsOverlay } from "@/components/workspace/shortcuts-overlay";
 import { ActiveTabTitle } from "@/components/workspace/active-tab-title";
 import { Tip } from "@/components/ui/tip";
+import { usePanelLayout } from "@/lib/panel-layout";
 import {
   PanelLeftClose,
   PanelLeft,
   FileText,
   Sparkles,
+  Minimize2,
 } from "lucide-react";
 import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
@@ -86,7 +86,7 @@ function CanvasHeader({
   const schema = schemas.find((s) => s.id === activeSchemaId);
 
   return (
-    <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
+    <div className="relative z-0 flex shrink-0 items-center gap-2 border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
       <Tip label={sidebarCollapsed ? "Show sidebar" : "Hide sidebar"}>
         <Button
           variant="ghost"
@@ -244,6 +244,7 @@ export default function Home() {
     refreshProjects,
   } = useWorkspace();
   const { schema: canvasSchema } = useSchema();
+  const { mode: layoutMode, reset: resetLayout } = usePanelLayout();
 
   const [newSchemaOpen, setNewSchemaOpen] = useState(false);
   const [newSchemaName, setNewSchemaName] = useState("");
@@ -268,6 +269,21 @@ export default function Home() {
   const [launcherOpen, setLauncherOpen] = useState(false);
 
   const activeSchema = schemas.find((s) => s.id === activeSchemaId);
+
+  // Listen for cross-component open requests (e.g. command palette).
+  useEffect(() => {
+    const onTrash = () => setTrashOpen(true);
+    const onProjects = () => setProjectsOpen(true);
+    const onLauncher = () => setLauncherOpen(true);
+    window.addEventListener("super-schema:open-trash", onTrash);
+    window.addEventListener("super-schema:open-projects", onProjects);
+    window.addEventListener("super-schema:open-launcher", onLauncher);
+    return () => {
+      window.removeEventListener("super-schema:open-trash", onTrash);
+      window.removeEventListener("super-schema:open-projects", onProjects);
+      window.removeEventListener("super-schema:open-launcher", onLauncher);
+    };
+  }, []);
 
   const toggleSidebar = () => {
     const panel = sidebarRef.current;
@@ -373,7 +389,7 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-full w-full flex-1 flex-col overflow-hidden">
+    <div className="flex min-h-0 w-full flex-1 flex-col overflow-hidden">
       <header className="flex h-10 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b bg-background/95 px-2 backdrop-blur-sm sm:gap-3 sm:px-3">
         <Link href="/" className="shrink-0">
           <BrandLogo />
@@ -414,7 +430,7 @@ export default function Home() {
           onOpenProjects={() => setProjectsOpen(true)}
           onBulkExport={async () => {
             const schemaName = activeSchema?.name?.trim() || "schema";
-            const t = toast.loading("Building bulk export…");
+            const t = toast.loading("Building bulk export");
             try {
               const blob = await bulkExport(canvasSchema, {
                 baseName: schemaName,
@@ -454,67 +470,94 @@ export default function Home() {
         </div>
       </header>
 
-      <ResizablePanelGroup orientation="horizontal" className="flex-1">
-        <ResizablePanel
-          panelRef={sidebarRef}
-          defaultSize={isMobile ? 70 : isTablet ? 28 : 20}
-          minSize={isMobile ? "50%" : "15%"}
-          maxSize={isMobile ? "90%" : isTablet ? "45%" : "30%"}
-          collapsible
-          collapsedSize={0}
-          onResize={(size) => setSidebarCollapsed(size.asPercentage === 0)}
+      {/* When a panel is maximized, replace the resizable layout with the
+          single panel filling the available space. Other panels remount on
+          restore — accept the trade-off (panel-local state resets) to keep
+          the layout simple. */}
+      {layoutMode === "default" ? (
+        <ResizablePanelGroup
+          orientation="horizontal"
+          className="min-h-0 flex-1"
         >
-          <SchemaSidebar />
-        </ResizablePanel>
-        <ResizableHandle withHandle />
-        <ResizablePanel defaultSize={70} minSize={30}>
-          <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel defaultSize={aiPanelOpen ? 70 : 100} minSize={40}>
-              <ResizablePanelGroup orientation="vertical">
-                <ResizablePanel defaultSize={65} minSize={30}>
-                  <div className="flex h-full flex-col">
-                    <CanvasHeader
-                      onToggleSidebar={toggleSidebar}
-                      sidebarCollapsed={sidebarCollapsed}
-                      onOpenProjects={() => setProjectsOpen(true)}
-                    />
-                    <TabBar />
-                    <div className="flex-1">
-                      <SchemaCanvas />
+          <ResizablePanel
+            panelRef={sidebarRef}
+            defaultSize={isMobile ? 70 : isTablet ? 28 : 20}
+            minSize={isMobile ? "50%" : "15%"}
+            maxSize={isMobile ? "90%" : isTablet ? "45%" : "30%"}
+            collapsible
+            collapsedSize={0}
+            onResize={(size) => setSidebarCollapsed(size.asPercentage === 0)}
+          >
+            <SchemaSidebar />
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={70} minSize={30}>
+            <ResizablePanelGroup orientation="horizontal">
+              <ResizablePanel defaultSize={aiPanelOpen ? 70 : 100} minSize={40}>
+                <ResizablePanelGroup orientation="vertical">
+                  <ResizablePanel defaultSize={65} minSize={30}>
+                    <div className="flex h-full flex-col">
+                      <CanvasHeader
+                        onToggleSidebar={toggleSidebar}
+                        sidebarCollapsed={sidebarCollapsed}
+                        onOpenProjects={() => setProjectsOpen(true)}
+                      />
+                      <TabBar />
+                      <div className="min-h-0 flex-1">
+                        <SchemaCanvas />
+                      </div>
                     </div>
-                  </div>
-                </ResizablePanel>
-                <ResizableHandle withHandle />
-                <ResizablePanel
-                  panelRef={sqlPanelRef}
-                  defaultSize={35}
-                  minSize={15}
-                  collapsible
-                  collapsedSize={0}
-                  onResize={(size) =>
-                    setSqlPanelCollapsed(size.asPercentage === 0)
-                  }
-                >
-                  <SqlPreview />
-                </ResizablePanel>
-              </ResizablePanelGroup>
-            </ResizablePanel>
-            {aiPanelOpen && (
-              <>
-                <ResizableHandle withHandle />
-                <ResizablePanel
-                  panelRef={aiPanelRef}
-                  defaultSize={isMobile ? 80 : isTablet ? 35 : 25}
-                  minSize={isMobile ? "60%" : "20%"}
-                  maxSize={isMobile ? "95%" : isTablet ? "55%" : "40%"}
-                >
-                  <AiChat onClose={() => setAiPanelOpen(false)} />
-                </ResizablePanel>
-              </>
-            )}
-          </ResizablePanelGroup>
-        </ResizablePanel>
-      </ResizablePanelGroup>
+                  </ResizablePanel>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel
+                    panelRef={sqlPanelRef}
+                    defaultSize={35}
+                    minSize={15}
+                    collapsible
+                    collapsedSize={0}
+                    onResize={(size) =>
+                      setSqlPanelCollapsed(size.asPercentage === 0)
+                    }
+                  >
+                    <SqlPreview />
+                  </ResizablePanel>
+                </ResizablePanelGroup>
+              </ResizablePanel>
+              {aiPanelOpen && (
+                <>
+                  <ResizableHandle withHandle />
+                  <ResizablePanel
+                    panelRef={aiPanelRef}
+                    defaultSize={isMobile ? 80 : isTablet ? 35 : 25}
+                    minSize={isMobile ? "60%" : "20%"}
+                    maxSize={isMobile ? "95%" : isTablet ? "55%" : "40%"}
+                  >
+                    <AiChat onClose={() => setAiPanelOpen(false)} />
+                  </ResizablePanel>
+                </>
+              )}
+            </ResizablePanelGroup>
+          </ResizablePanel>
+        </ResizablePanelGroup>
+      ) : (
+        <div className="relative min-h-0 flex-1">
+          <Tip label="Restore default layout">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={resetLayout}
+              className="absolute right-3 top-3 z-20 size-7 shadow-sm"
+            >
+              <Minimize2 className="size-3.5" />
+            </Button>
+          </Tip>
+          {layoutMode === "sidebar" && <SchemaSidebar />}
+          {layoutMode === "sql" && <SqlPreview />}
+          {layoutMode === "ai" && (
+            <AiChat onClose={() => setAiPanelOpen(false)} />
+          )}
+        </div>
+      )}
 
       <Dialog open={newSchemaOpen} onOpenChange={setNewSchemaOpen}>
         <DialogContent className="sm:max-w-md">
@@ -713,8 +756,6 @@ export default function Home() {
         onOpenChange={setProjectsOpen}
       />
 
-      <CommandPalette />
-      <ShortcutsOverlay />
       <ActiveTabTitle />
     </div>
   );

@@ -54,7 +54,7 @@ export function CollabToggle({ className }: CollabToggleProps) {
         label={
           enabled
             ? collab.status === "connecting"
-              ? "Connecting…"
+              ? "Connecting"
               : peerCount > 0
                 ? `${peerCount} other peer${peerCount === 1 ? "" : "s"} connected`
                 : "Live — waiting for peers"

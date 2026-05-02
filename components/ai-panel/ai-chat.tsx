@@ -11,6 +11,8 @@ import {
   Clock,
   Copy,
   Lightbulb,
+  Maximize2,
+  Minimize2,
   Pencil,
   Plus,
   RefreshCw,
@@ -21,6 +23,7 @@ import {
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { usePanelLayout } from "@/lib/panel-layout";
 
 type MessageRole = "user" | "assistant" | "error" | "system";
 
@@ -100,6 +103,8 @@ async function callAi<T = unknown>(
 
 export function AiChat({ onClose }: { onClose: () => void }) {
   const { schema, importAiSchema } = useSchema();
+  const { isMaximized, toggle: toggleMax } = usePanelLayout();
+  const aiMax = isMaximized("ai");
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(false);
@@ -357,6 +362,19 @@ export function AiChat({ onClose }: { onClose: () => void }) {
           <Button
             variant="ghost"
             size="icon-xs"
+            onClick={() => toggleMax("ai")}
+            title={aiMax ? "Restore layout" : "Maximize AI panel"}
+            aria-label={aiMax ? "Restore layout" : "Maximize AI panel"}
+          >
+            {aiMax ? (
+              <Minimize2 className="size-3.5" />
+            ) : (
+              <Maximize2 className="size-3.5" />
+            )}
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
             onClick={onClose}
             title="Close"
             aria-label="Close"
@@ -508,7 +526,7 @@ export function AiChat({ onClose }: { onClose: () => void }) {
               <div className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary/15">
                 <Sparkles className="size-3.5 text-primary" />
               </div>
-              <Loader size="sm" label="Thinking…" />
+              <Loader size="sm" label="Thinking" />
             </div>
           )}
         </div>
@@ -527,7 +545,7 @@ export function AiChat({ onClose }: { onClose: () => void }) {
                   submitPrompt();
                 }
               }}
-              placeholder="Describe a database, ask a question, or paste a description…"
+              placeholder="Describe a database, ask a question, or paste a description"
               rows={Math.min(6, Math.max(1, input.split("\n").length))}
               disabled={loading}
               className="flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed outline-none placeholder:text-muted-foreground disabled:opacity-50"

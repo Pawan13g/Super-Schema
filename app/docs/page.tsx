@@ -436,11 +436,20 @@ export default function DocsPage() {
               <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed">
                 <li><b>Drag</b> tables to reposition them. Position auto-saves.</li>
                 <li><b>Drag handles</b> on a column to draw a relation to another table&apos;s column.</li>
+                <li><b>Click an edge</b> to highlight it, then <Kbd>Delete</Kbd> to remove the relation.</li>
                 <li><b>Right-click</b> a node, edge, or empty space for contextual actions.</li>
-                <li><b>Auto-arrange</b> button (bottom-left controls) lays out tables by FK depth.</li>
+                <li><b>Auto-arrange</b> with <Kbd>⇧</Kbd>+<Kbd>L</Kbd> or the bottom-left button.</li>
                 <li><b>Mini-map</b> on desktop helps navigate large schemas.</li>
                 <li><b>Export PNG</b> from <i>File → Export canvas as PNG</i>.</li>
                 <li><b>Undo / Redo</b> with <Kbd>⌘</Kbd>+<Kbd>Z</Kbd> / <Kbd>⌘</Kbd>+<Kbd>⇧</Kbd>+<Kbd>Z</Kbd>.</li>
+              </ul>
+              <h3 className="mt-5 text-sm font-semibold">Editing tables &amp; columns</h3>
+              <ul className="mt-2 list-disc space-y-1.5 pl-5 text-sm leading-relaxed">
+                <li><b>Click</b> a table or column in the sidebar to select it (highlights in primary color).</li>
+                <li><b>Double-click a table</b> or press <Kbd>Enter</Kbd> while selected → opens the table settings popup (general, columns, indexes, relationships).</li>
+                <li><b>Double-click a column</b> or press <Kbd>Enter</Kbd> while selected → opens the column edit popup with name, type, constraint pills (PK / NN / UQ / AI / FK), default value, foreign-key picker, and comment.</li>
+                <li>Constraint pills auto-disable mutually exclusive options (e.g. AUTO_INCREMENT + REFERENCES).</li>
+                <li>Setting a default value automatically toggles the <code>DEFAULT</code> constraint.</li>
               </ul>
             </Section>
 
@@ -480,7 +489,7 @@ export default function DocsPage() {
                 <b> Blog / CMS</b>, <b>Auth (NextAuth-style)</b>, <b>Inventory</b>.
               </p>
               <ol className="mt-2 list-decimal space-y-1 pl-5 text-sm">
-                <li>Open <b>File → Templates library…</b></li>
+                <li>Open <b>File → Templates library</b></li>
                 <li>Pick a template — preview shows tables, columns, comments.</li>
                 <li>Click <b>Load template</b>. Loading replaces the current canvas (confirmation prompt if not empty).</li>
               </ol>
@@ -489,7 +498,7 @@ export default function DocsPage() {
             <Section id="csv-import" eyebrow="Workflow" title="CSV → table" icon={FileText}>
               <p className="text-sm leading-relaxed">
                 Drop a CSV; the app proposes a table by sampling the first 200
-                rows. Open <b>File → Import CSV as table…</b>.
+                rows. Open <b>File → Import CSV as table</b>.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li>Auto-detected delimiter (<code>,</code> / <code>;</code> / tab / <code>|</code>) and RFC 4180 quoting.</li>
@@ -503,7 +512,7 @@ export default function DocsPage() {
             <Section id="doc-gen" eyebrow="AI" title="AI doc-gen" icon={Sparkles}>
               <p className="text-sm leading-relaxed">
                 Auto-generates table and column comments using your configured
-                AI provider. Open <b>Schema → AI doc-gen…</b>.
+                AI provider. Open <b>Schema → AI doc-gen</b>.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li>Per-table and per-column suggestions with checkboxes — apply only what you want.</li>
@@ -516,10 +525,10 @@ export default function DocsPage() {
             <Section id="index-advisor" eyebrow="Performance" title="Index advisor" icon={Zap}>
               <p className="text-sm leading-relaxed">
                 Suggests indexes for join and lookup performance. Open{" "}
-                <b>Schema → Index advisor…</b>.
+                <b>Schema → Index advisor</b>.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
-                <li><b>Rule-based candidates</b> (always on): every FK source column, common lookup names (<code>email</code>, <code>slug</code>, <code>status</code>…), timestamp columns.</li>
+                <li><b>Rule-based candidates</b> (always on): every FK source column, common lookup names (<code>email</code>, <code>slug</code>, <code>status</code>), timestamp columns.</li>
                 <li><b>Ask AI</b> button augments with deeper, ranked suggestions including compound indexes.</li>
                 <li>Skips columns already covered by a PRIMARY KEY, UNIQUE constraint, or existing index.</li>
                 <li>Pick which to apply — adds them to the schema with sensible names.</li>
@@ -529,7 +538,7 @@ export default function DocsPage() {
             <Section id="compare" eyebrow="Workflow" title="Compare schemas" icon={Compass}>
               <p className="text-sm leading-relaxed">
                 Diff two schemas across any of your projects. Open{" "}
-                <b>Schema → Compare schemas…</b>.
+                <b>Schema → Compare schemas</b>.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li>Pick a <b>From (old)</b> and <b>To (new)</b> schema; swap with the arrow button.</li>
@@ -545,9 +554,9 @@ export default function DocsPage() {
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li><code>CREATE TABLE</code> for added tables (with FK constraints inline).</li>
-                <li><code>DROP TABLE … CASCADE</code> for removed tables.</li>
+                <li><code>DROP TABLE  CASCADE</code> for removed tables.</li>
                 <li>
-                  <code>ALTER TABLE … ADD / DROP / MODIFY COLUMN</code>,{" "}
+                  <code>ALTER TABLE  ADD / DROP / MODIFY COLUMN</code>,{" "}
                   <code>ALTER COLUMN TYPE</code>, <code>SET / DROP NOT NULL</code>, default changes.
                 </li>
                 <li>FK add/drop on existing tables, with dialect-correct syntax.</li>
@@ -559,7 +568,7 @@ export default function DocsPage() {
             <Section id="share" eyebrow="Collaboration" title="Read-only share links" icon={KeyRound}>
               <p className="text-sm leading-relaxed">
                 Generate a public URL anyone can view — no sign-in required.
-                Open <b>Schema → Share read-only…</b>.
+                Open <b>Schema → Share read-only</b>.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li>One active link per schema; reusing the action returns the existing token.</li>
@@ -598,13 +607,32 @@ export default function DocsPage() {
             </Section>
 
             <Section id="shortcuts" eyebrow="Productivity" title="Shortcuts & command palette" icon={Zap}>
-              <ul className="grid gap-2 sm:grid-cols-2">
+              <p className="text-sm leading-relaxed">
+                Press <kbd className="rounded border bg-muted px-1.5 py-0.5 font-mono text-[11px]">?</kbd>{" "}
+                anywhere to see the full overlay. Highlights below; the palette
+                also exposes high-priority actions like create workspace,
+                project, schema, and table at the top.
+              </p>
+              <ul className="mt-3 grid gap-2 sm:grid-cols-2">
                 <ShortcutRow keys={["?"]} desc="Open the keyboard shortcuts overlay" />
-                <ShortcutRow keys={["⌘", "K"]} desc="Command palette — jump to any table or page" />
+                <ShortcutRow keys={["⌘", "K"]} desc="Command palette" />
+                <ShortcutRow keys={["⌘", "S"]} desc="Save schema now" />
                 <ShortcutRow keys={["⌘", "Z"]} desc="Undo canvas edit" />
                 <ShortcutRow keys={["⌘", "⇧", "Z"]} desc="Redo canvas edit" />
                 <ShortcutRow keys={["⌘", "T"]} desc="Add table" />
-                <ShortcutRow keys={["⌘", "N"]} desc="New schema" />
+                <ShortcutRow keys={["⌘", "C"]} desc="Copy selected table" />
+                <ShortcutRow keys={["⌘", "V"]} desc="Paste table" />
+                <ShortcutRow keys={["⌘", "D"]} desc="Duplicate selected table" />
+                <ShortcutRow keys={["R"]} desc="Rename selected table" />
+                <ShortcutRow keys={["⇧", "C"]} desc="Add column to selected table" />
+                <ShortcutRow keys={["⇧", "L"]} desc="Auto-arrange tables" />
+                <ShortcutRow keys={["⇧", "R"]} desc="Open relation dialog" />
+                <ShortcutRow keys={["F"]} desc="Fit canvas to view" />
+                <ShortcutRow keys={["="]} desc="Zoom in" />
+                <ShortcutRow keys={["-"]} desc="Zoom out" />
+                <ShortcutRow keys={["Click edge"]} desc="Select relation (Delete to remove)" />
+                <ShortcutRow keys={["Delete"]} desc="Delete selected table or relation" />
+                <ShortcutRow keys={["/"]} desc="Focus sidebar search" />
                 <ShortcutRow keys={["Esc"]} desc="Close menus and dialogs" />
               </ul>
             </Section>
@@ -767,7 +795,7 @@ export default function DocsPage() {
 
             <Section id="reviews" eyebrow="Teams" title="Schema reviews (PR-style)" icon={Compass}>
               <p className="text-sm leading-relaxed">
-                Open <b>Schema → Schema reviews…</b> to propose canvas
+                Open <b>Schema → Schema reviews</b> to propose canvas
                 changes for approval before they go live.
               </p>
               <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm">
@@ -781,7 +809,7 @@ export default function DocsPage() {
             <Section id="trash" eyebrow="Teams" title="Trash bin" icon={ShieldCheck}>
               <p className="text-sm leading-relaxed">
                 Deleting a project or schema doesn&apos;t wipe it immediately.
-                It moves to <b>File → Trash bin…</b> for 30 days, then auto-prunes.
+                It moves to <b>File → Trash bin</b> for 30 days, then auto-prunes.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li>Restore in one click. Schemas inside a trashed project need the project restored first.</li>
@@ -793,7 +821,7 @@ export default function DocsPage() {
             <Section id="connect-db" eyebrow="Connect" title="Live database import" icon={Database}>
               <p className="text-sm leading-relaxed">
                 Pull the schema from a running database directly onto the
-                canvas. Open <b>File → Connect to live DB…</b>.
+                canvas. Open <b>File → Connect to live DB</b>.
               </p>
               <ol className="mt-2 list-decimal space-y-1.5 pl-5 text-sm">
                 <li>Pick PostgreSQL or MySQL.</li>
@@ -812,7 +840,7 @@ export default function DocsPage() {
               <ul className="list-disc space-y-1.5 pl-5 text-sm leading-relaxed">
                 <li><b>Your AI key stays yours.</b> Encrypted at rest with AES-256-GCM, decrypted server-side per request, never returned to the browser. We don&apos;t log or retain provider responses.</li>
                 <li><b>Schemas are private by default.</b> Only you (and people in your workspace) can see them.</li>
-                <li><b>Read-only share links</b> are unguessable random tokens. Revoke any time from <b>Schema → Share read-only…</b>.</li>
+                <li><b>Read-only share links</b> are unguessable random tokens. Revoke any time from <b>Schema → Share read-only</b>.</li>
                 <li><b>Real-time collaboration</b> syncs peer-to-peer over WebRTC. Schema state never round-trips through us while you collaborate.</li>
                 <li><b>Live DB connection strings</b> are used once for introspection then discarded. Not stored.</li>
                 <li><b>Mock query execution</b> runs entirely in your browser. <code>DROP</code> / <code>DELETE</code> / <code>TRUNCATE</code> are blocked.</li>

@@ -33,8 +33,10 @@ const SECTIONS: { title: string; items: Shortcut[] }[] = [
       { keys: [modKey, "C"], label: "Copy selected table" },
       { keys: [modKey, "V"], label: "Paste table" },
       { keys: [modKey, "D"], label: "Duplicate selected table" },
-      { keys: ["Delete"], label: "Delete selected table" },
-      { keys: ["Backspace"], label: "Delete selected table (alt)" },
+      { keys: ["R"], label: "Rename selected table" },
+      { keys: [shiftKey, "C"], label: "Add column to selected table" },
+      { keys: ["Delete"], label: "Delete selected table or relation" },
+      { keys: ["Backspace"], label: "Delete selected (alt)" },
       { keys: [modKey, "A"], label: "Select all tables" },
       { keys: ["Esc"], label: "Clear selection / close menus" },
     ],
@@ -42,6 +44,12 @@ const SECTIONS: { title: string; items: Shortcut[] }[] = [
   {
     title: "Canvas",
     items: [
+      { keys: ["F"], label: "Fit canvas to view" },
+      { keys: [shiftKey, "L"], label: "Auto-arrange tables" },
+      { keys: [shiftKey, "R"], label: "Open relation dialog" },
+      { keys: ["="], label: "Zoom in" },
+      { keys: ["-"], label: "Zoom out" },
+      { keys: ["Click edge"], label: "Select relation (Delete to remove)" },
       { keys: ["Right-click"], label: "Context menu (table / edge / pane)" },
       { keys: ["Drag handle"], label: "Create a relation between columns" },
       { keys: ["Double-click"], label: "Rename table" },
@@ -53,6 +61,7 @@ const SECTIONS: { title: string; items: Shortcut[] }[] = [
     title: "Search & navigation",
     items: [
       { keys: [modKey, "K"], label: "Open command palette" },
+      { keys: ["/"], label: "Focus sidebar search" },
       { keys: ["?"], label: "Show this shortcuts overlay" },
     ],
   },

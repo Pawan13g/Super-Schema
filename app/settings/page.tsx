@@ -122,7 +122,7 @@ export default function SettingsPage() {
   };
 
   if (status === "loading" || loadingInitial) {
-    return <FullPageLoader label="Loading settings…" />;
+    return <FullPageLoader label="Loading settings" />;
   }
   if (status !== "authenticated") {
     return (
@@ -384,7 +384,7 @@ function AccountTab({
               <Input
                 value={image}
                 onChange={(e) => setImage(e.target.value)}
-                placeholder="https://…"
+                placeholder="https://"
                 className="mt-2 h-8 text-xs"
               />
             </div>
@@ -675,7 +675,7 @@ function AiTab({
                       settings.hasApiKey
                         ? `Saved: ${settings.apiKeyMask ?? "•••• ••••"} — type new key to replace`
                         : provider === "bedrock"
-                          ? "AKIA…"
+                          ? "AKIA"
                           : "Paste your API key"
                     }
                     className="pr-10"
@@ -956,7 +956,7 @@ function ConnectionsTab({ profile }: { profile: ProfileData | null }) {
       >
         {!callbackInfo ? (
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Loader size="xs" /> Loading…
+            <Loader size="xs" /> Loading
           </div>
         ) : (
           <div className="space-y-3">

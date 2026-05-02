@@ -14,7 +14,9 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { Loader } from "@/components/ui/loader";
-import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Upload, AlertTriangle, History } from "lucide-react";
+import { Copy, Check, Download, FileJson, Code2, Search, Boxes, FileUp, Upload, AlertTriangle, History, Maximize2, Minimize2 } from "lucide-react";
+import { Tip } from "@/components/ui/tip";
+import { usePanelLayout } from "@/lib/panel-layout";
 import { QueryPanel } from "./query-panel";
 import { ProblemsPanel } from "./problems-panel";
 import { VersionHistoryPanel } from "./version-history-panel";
@@ -34,6 +36,8 @@ const isModelTarget = (v: unknown): v is ModelTarget =>
 
 export function SqlPreview() {
   const { schema, replaceSchema } = useSchema();
+  const { isMaximized, toggle: toggleMax } = usePanelLayout();
+  const sqlMax = isMaximized("sql");
   const [dialect, setDialect] = useStoredState<SqlDialect>(
     "super-schema:sql-dialect",
     "postgresql",
@@ -313,6 +317,20 @@ export function SqlPreview() {
               </Button>
             </div>
           )}
+          <Tip label={sqlMax ? "Restore layout" : "Maximize SQL panel"}>
+            <Button
+              variant="ghost"
+              size="icon-xs"
+              onClick={() => toggleMax("sql")}
+              className="ml-auto shrink-0"
+            >
+              {sqlMax ? (
+                <Minimize2 className="size-3" />
+              ) : (
+                <Maximize2 className="size-3" />
+              )}
+            </Button>
+          </Tip>
         </div>
 
         {/* SQL Output tab */}

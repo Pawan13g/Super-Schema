@@ -28,7 +28,7 @@ export function SaveStatusBadge() {
 
   if (saveStatus === "saving") {
     icon = <Loader2 className="size-3 animate-spin" />;
-    label = "saving…";
+    label = "saving";
     cls = "text-amber-600 dark:text-amber-400";
   } else if (saveStatus === "error") {
     icon = <CloudOff className="size-3" />;

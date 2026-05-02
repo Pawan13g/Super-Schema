@@ -19,6 +19,7 @@ import {
   ChevronRight,
   ChevronsDownUp,
   Columns3,
+  GripVertical,
   Hash,
   KeyRound,
   Link2,
@@ -31,11 +32,11 @@ import {
   Trash2,
 } from "lucide-react";
 import { TableConfigDialog } from "@/components/workspace/table-config-dialog";
+import { ColumnConfigDialog } from "./column-config-dialog";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useStoredState } from "@/lib/use-stored-state";
 import { Tip } from "@/components/ui/tip";
 import {
-  COLUMN_TYPES,
   type ColumnConstraint,
   type ColumnType,
 } from "@/lib/types";
@@ -54,6 +55,7 @@ export function SchemaSidebar() {
     addColumn,
     removeColumn,
     updateColumn,
+    reorderColumn,
     addIndex,
     removeIndex,
     updateTableComment,
@@ -88,7 +90,24 @@ export function SchemaSidebar() {
   );
   // Active tab for the inline edit panel under the selected table.
   const [activeTab, setActiveTab] = useState<TablePanelTab>("columns");
-  const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
+  // Column-level selection for keyboard targeting (Enter opens config dialog).
+  const [selectedColumn, setSelectedColumn] = useState<{
+    tableId: string;
+    columnId: string;
+  } | null>(null);
+  const selectedColumnRef = useRef(selectedColumn);
+  useEffect(() => {
+    selectedColumnRef.current = selectedColumn;
+  }, [selectedColumn]);
+  const selectedTableRef = useRef(selectedTableId);
+  useEffect(() => {
+    selectedTableRef.current = selectedTableId;
+  }, [selectedTableId]);
+  // Column edit dialog state.
+  const [configColumn, setConfigColumn] = useState<{
+    tableId: string;
+    columnId: string;
+  } | null>(null);
 
   const [indexDrafts, setIndexDrafts] = useState<
     Record<string, { name: string; columnId: string; unique: boolean }>
@@ -123,6 +142,35 @@ export function SchemaSidebar() {
       e.preventDefault();
       searchInputRef.current?.focus();
       searchInputRef.current?.select();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  // Enter on selected column → open column config. Enter on selected table
+  // (with no column highlighted) → open table config dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Enter") return;
+      const t = e.target as HTMLElement | null;
+      if (
+        t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable)
+      )
+        return;
+      const col = selectedColumnRef.current;
+      if (col) {
+        e.preventDefault();
+        setConfigColumn(col);
+        return;
+      }
+      const tableId = selectedTableRef.current;
+      if (tableId) {
+        e.preventDefault();
+        setConfigTableId(tableId);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -184,7 +232,7 @@ export function SchemaSidebar() {
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground/70" />
           <Input
             ref={searchInputRef}
-            placeholder="Search…"
+            placeholder="Search"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="h-8 rounded-md bg-muted/40 pl-8 pr-7 text-xs"
@@ -314,10 +362,15 @@ export function SchemaSidebar() {
                     ) : (
                       <button
                         type="button"
-                        onClick={() => handleSelectTable(table.id)}
+                        onClick={() => {
+                          handleSelectTable(table.id);
+                          setSelectedColumn(null);
+                        }}
                         onDoubleClick={(e) => {
                           e.stopPropagation();
-                          beginRename(table.id, table.name);
+                          setSelectedTableId(table.id);
+                          setSelectedColumn(null);
+                          setConfigTableId(table.id);
                         }}
                         className="flex flex-1 truncate text-left"
                       >
@@ -335,7 +388,7 @@ export function SchemaSidebar() {
                     )}
 
                     <span className="ml-auto flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/table:opacity-100">
-                      <Tip label="Configure table…">
+                      <Tip label="Configure table">
                         <button
                           type="button"
                           onClick={(e) => {
@@ -393,29 +446,37 @@ export function SchemaSidebar() {
                             <ColumnRow
                               key={col.id}
                               tableId={table.id}
-                              tableColor={table.color}
                               col={col}
-                              editing={editingColumnId === col.id}
-                              onStartEdit={() => {
-                                setSelectedTableId(table.id);
-                                setEditingColumnId(col.id);
-                                setActiveTab("columns");
-                              }}
-                              onStopEdit={() => setEditingColumnId(null)}
-                              onUpdate={(updates) =>
-                                updateColumn(table.id, col.id, updates)
+                              isSelected={
+                                selectedColumn?.tableId === table.id &&
+                                selectedColumn?.columnId === col.id
                               }
-                              onPickFk={() =>
-                                setFkPicker({
+                              onSelect={() => {
+                                setSelectedTableId(table.id);
+                                setSelectedColumn({
                                   tableId: table.id,
                                   columnId: col.id,
-                                })
-                              }
+                                });
+                              }}
+                              onOpenConfig={() => {
+                                setSelectedTableId(table.id);
+                                setSelectedColumn({
+                                  tableId: table.id,
+                                  columnId: col.id,
+                                });
+                                setConfigColumn({
+                                  tableId: table.id,
+                                  columnId: col.id,
+                                });
+                              }}
                               onDelete={() =>
                                 setConfirmDeleteColumn({
                                   tableId: table.id,
                                   columnId: col.id,
                                 })
+                              }
+                              onReorder={(src, tgt, pos) =>
+                                reorderColumn(table.id, src, tgt, pos)
                               }
                             />
                           ))
@@ -621,6 +682,18 @@ export function SchemaSidebar() {
           if (!o) setConfigTableId(null);
         }}
       />
+
+      <ColumnConfigDialog
+        tableId={configColumn?.tableId ?? null}
+        columnId={configColumn?.columnId ?? null}
+        onOpenChange={(o) => {
+          if (!o) setConfigColumn(null);
+        }}
+        onPickFk={() => {
+          if (!configColumn) return;
+          setFkPicker(configColumn);
+        }}
+      />
     </div>
   );
 }
@@ -647,7 +720,6 @@ function SubGroupHeader({
 
 interface ColumnRowProps {
   tableId: string;
-  tableColor: string;
   col: {
     id: string;
     name: string;
@@ -655,154 +727,29 @@ interface ColumnRowProps {
     constraints: ColumnConstraint[];
     references?: { table: string; column: string };
   };
-  editing: boolean;
-  onStartEdit: () => void;
-  onStopEdit: () => void;
-  onUpdate: (updates: Partial<ColumnRowProps["col"]>) => void;
-  onPickFk: () => void;
+  isSelected: boolean;
+  onSelect: () => void;
+  onOpenConfig: () => void;
   onDelete: () => void;
+  onReorder: (
+    sourceColumnId: string,
+    targetColumnId: string,
+    position: "before" | "after"
+  ) => void;
 }
 
 function ColumnRow({
+  tableId,
   col,
-  editing,
-  onStartEdit,
-  onStopEdit,
-  onUpdate,
-  onPickFk,
+  isSelected,
+  onSelect,
+  onOpenConfig,
   onDelete,
+  onReorder,
 }: ColumnRowProps) {
   const isPk = col.constraints.includes("PRIMARY KEY");
   const isFk = col.constraints.includes("REFERENCES");
-  const isAi = col.constraints.includes("AUTO_INCREMENT");
 
-  const PILL_FULL: Record<ColumnConstraint, string> = {
-    "PRIMARY KEY": "Primary Key",
-    "NOT NULL": "Not Null",
-    UNIQUE: "Unique",
-    AUTO_INCREMENT: "Auto Increment",
-    DEFAULT: "Default value",
-    CHECK: "Check constraint",
-    REFERENCES: "Foreign Key",
-  };
-
-  // Constraint pill helpers — visible only in edit mode.
-  const pillToggle = (constraint: ColumnConstraint, label: string, color: string) => {
-    const active = col.constraints.includes(constraint);
-    const disabled =
-      (constraint === "AUTO_INCREMENT" && isFk) ||
-      (constraint === "REFERENCES" && isAi);
-    const reason = disabled
-      ? constraint === "AUTO_INCREMENT"
-        ? "Disabled — column is a foreign key"
-        : "Disabled — column auto-increments"
-      : `${PILL_FULL[constraint]} (${active ? "on" : "off"}) — click to toggle`;
-    return (
-      <Tip key={constraint} label={reason}>
-        <button
-          type="button"
-          onClick={(e) => {
-            e.stopPropagation();
-            if (constraint === "REFERENCES" && !active) {
-              onPickFk();
-              return;
-            }
-            const next = active
-              ? col.constraints.filter((c) => c !== constraint)
-              : [...col.constraints, constraint];
-            const updates: Partial<typeof col> = { constraints: next };
-            if (constraint === "REFERENCES" && active) {
-              updates.references = undefined;
-            }
-            onUpdate(updates);
-          }}
-          disabled={disabled}
-          className={cn(
-            "rounded px-1 py-px text-[9px] font-semibold leading-tight transition-colors",
-            active
-              ? color
-              : "text-muted-foreground/40 hover:text-muted-foreground",
-            disabled && "cursor-not-allowed opacity-40"
-          )}
-        >
-          {label}
-        </button>
-      </Tip>
-    );
-  };
-
-  if (editing) {
-    return (
-      <div className="border-y border-border/40 bg-card px-2 py-1.5">
-        <div className="flex items-center gap-1">
-          <div className="flex shrink-0 items-center gap-0.5">
-            {pillToggle("PRIMARY KEY", "PK", "bg-amber-500/15 text-amber-600")}
-            {pillToggle("NOT NULL", "NN", "bg-violet-500/15 text-violet-600")}
-            {pillToggle("UNIQUE", "UQ", "bg-violet-500/15 text-violet-600")}
-            {pillToggle(
-              "AUTO_INCREMENT",
-              "AI",
-              "bg-violet-500/15 text-violet-600"
-            )}
-            {pillToggle("REFERENCES", "FK", "bg-cyan-500/15 text-cyan-600")}
-          </div>
-          <Input
-            value={col.name}
-            onChange={(e) => onUpdate({ name: e.target.value })}
-            onClick={(e) => e.stopPropagation()}
-            className="h-6 min-w-0 flex-1 px-1.5 text-[11px]"
-            autoFocus
-          />
-          <Select
-            value={col.type}
-            onValueChange={(val) => {
-              if (val) onUpdate({ type: val as ColumnType });
-            }}
-          >
-            <SelectTrigger
-              size="sm"
-              className="h-6 w-[78px] shrink-0 px-1.5 text-[10px]"
-            >
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {COLUMN_TYPES.map((type) => (
-                <SelectItem key={type} value={type}>
-                  {type}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Tip label="Delete field">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDelete();
-              }}
-              className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            >
-              <Trash2 className="size-3" />
-            </button>
-          </Tip>
-          <Tip label="Done editing">
-            <button
-              type="button"
-              onClick={(e) => {
-                e.stopPropagation();
-                onStopEdit();
-              }}
-              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
-            >
-              <ChevronDown className="size-3" />
-            </button>
-          </Tip>
-        </div>
-      </div>
-    );
-  }
-
-  // Compact tree row (matches screenshot styling).
   const TypeIcon = isPk ? KeyRound : isFk ? Link2 : Columns3;
   const typeColor = isPk
     ? "text-amber-500"
@@ -810,20 +757,102 @@ function ColumnRow({
       ? "text-cyan-500"
       : "text-muted-foreground/60";
 
+  const [dragOver, setDragOver] = useState<"before" | "after" | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const COLUMN_DND_TYPE = "application/super-schema-column";
+
   return (
-    <button
-      type="button"
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={(e) => {
+        e.stopPropagation();
+        e.dataTransfer.setData(
+          COLUMN_DND_TYPE,
+          JSON.stringify({ tableId, columnId: col.id })
+        );
+        e.dataTransfer.effectAllowed = "move";
+        setIsDragging(true);
+      }}
+      onDragEnd={() => {
+        setIsDragging(false);
+        setDragOver(null);
+      }}
+      onDragOver={(e) => {
+        if (!e.dataTransfer.types.includes(COLUMN_DND_TYPE)) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = "move";
+        const rect = e.currentTarget.getBoundingClientRect();
+        const offset = e.clientY - rect.top;
+        setDragOver(offset < rect.height / 2 ? "before" : "after");
+      }}
+      onDragLeave={(e) => {
+        // Ignore leave events for child elements within the row.
+        if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+        setDragOver(null);
+      }}
+      onDrop={(e) => {
+        const raw = e.dataTransfer.getData(COLUMN_DND_TYPE);
+        setDragOver(null);
+        if (!raw) return;
+        e.preventDefault();
+        e.stopPropagation();
+        try {
+          const payload = JSON.parse(raw) as {
+            tableId: string;
+            columnId: string;
+          };
+          if (payload.tableId !== tableId) return;
+          if (payload.columnId === col.id) return;
+          const rect = e.currentTarget.getBoundingClientRect();
+          const offset = e.clientY - rect.top;
+          const position = offset < rect.height / 2 ? "before" : "after";
+          onReorder(payload.columnId, col.id, position);
+        } catch {
+          /* ignore */
+        }
+      }}
       onClick={(e) => {
         e.stopPropagation();
-        onStartEdit();
+        onSelect();
       }}
-      className="group/col flex w-full items-center gap-1.5 px-2 py-0.5 text-[11px] hover:bg-muted/60"
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        onOpenConfig();
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          e.stopPropagation();
+          onOpenConfig();
+        }
+      }}
+      className={cn(
+        "group/col relative flex w-full cursor-pointer items-center gap-1.5 px-2 py-0.5 text-[11px] outline-none transition-colors",
+        isSelected
+          ? "bg-primary/10 ring-1 ring-inset ring-primary/30"
+          : "hover:bg-muted/60 focus-visible:bg-muted/60",
+        isDragging && "opacity-40"
+      )}
+      title="Drag to reorder · double-click or Enter to edit"
     >
+      {dragOver && (
+        <span
+          className={cn(
+            "pointer-events-none absolute inset-x-1 h-0.5 rounded-full bg-primary",
+            dragOver === "before" ? "-top-px" : "-bottom-px"
+          )}
+        />
+      )}
+      <GripVertical className="size-3 shrink-0 cursor-grab text-muted-foreground/30 opacity-0 transition-opacity group-hover/col:opacity-100 active:cursor-grabbing" />
       <TypeIcon className={cn("size-3 shrink-0", typeColor)} />
       <span
         className={cn(
           "truncate font-mono",
-          isPk ? "font-semibold text-foreground" : "text-foreground/90"
+          isPk ? "font-semibold text-foreground" : "text-foreground/90",
+          isSelected && "text-primary"
         )}
       >
         {col.name}
@@ -834,7 +863,33 @@ function ColumnRow({
       <span className="ml-auto truncate font-mono text-[10px] text-muted-foreground">
         {col.type.toLowerCase()}
       </span>
-    </button>
+      <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover/col:opacity-100">
+        <Tip label="Edit column">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onOpenConfig();
+            }}
+            className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+          >
+            <Pencil className="size-3" />
+          </button>
+        </Tip>
+        <Tip label="Delete column">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onDelete();
+            }}
+            className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+          >
+            <Trash2 className="size-3" />
+          </button>
+        </Tip>
+      </span>
+    </div>
   );
 }
 
@@ -966,7 +1021,7 @@ function SelectedTablePanel({
           <textarea
             value={commentDraft}
             onChange={(e) => onCommentDraftChange(e.target.value)}
-            placeholder="Write a table comment…"
+            placeholder="Write a table comment"
             className="min-h-[64px] w-full resize-none rounded-md border border-input bg-background px-2 py-1.5 text-[11px] outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/50"
           />
           <div className="flex items-center gap-2">
@@ -1009,7 +1064,7 @@ function SelectedTablePanel({
                     onChange={(e) =>
                       onUpdateColumnComment(col.id, e.target.value)
                     }
-                    placeholder="Add field comment…"
+                    placeholder="Add field comment"
                     className="h-6 text-[11px]"
                   />
                 </div>

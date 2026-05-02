@@ -92,7 +92,7 @@ export function PwaRegister() {
       await installEvent.prompt();
       const choice = await installEvent.userChoice;
       if (choice.outcome === "accepted") {
-        toast.success("Installing…");
+        toast.success("Installing");
       }
       setInstallEvent(null);
     } catch {

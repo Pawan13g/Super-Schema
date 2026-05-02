@@ -218,7 +218,7 @@ function TableConfigBody({
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
                 onBlur={commitComment}
-                placeholder="Describe what this table represents…"
+                placeholder="Describe what this table represents"
                 className="min-h-[88px] w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-xs outline-none placeholder:text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring/50"
               />
               <p className="text-[10px] text-muted-foreground">
@@ -483,7 +483,7 @@ function ColumnsTab({
                     onChange={(e) =>
                       onUpdateColumn(col.id, { comment: e.target.value })
                     }
-                    placeholder="Short description…"
+                    placeholder="Short description"
                     className="h-7 text-[11px]"
                   />
                 </div>
@@ -607,7 +607,7 @@ function IndexesTab({
             <Input
               value={draftName}
               onChange={(e) => setDraftName(e.target.value)}
-              placeholder={`idx_${table.name}_…`}
+              placeholder={`idx_${table.name}_`}
               className="h-7 text-xs"
             />
             <div className="grid gap-1">

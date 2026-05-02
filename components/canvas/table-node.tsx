@@ -191,7 +191,7 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
           )}
         >
           {onConfigure && (
-            <Tip label="Configure table…">
+            <Tip label="Configure table">
               <button
                 onClick={(e) => {
                   e.stopPropagation();
