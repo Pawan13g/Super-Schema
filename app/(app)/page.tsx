@@ -86,7 +86,7 @@ function CanvasHeader({
   const schema = schemas.find((s) => s.id === activeSchemaId);
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
+    <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-card/60 px-2 py-2 backdrop-blur-sm sm:px-3">
       <Button
         variant="ghost"
         size="icon"
@@ -101,8 +101,10 @@ function CanvasHeader({
         )}
       </Button>
 
-      <WorkspaceSwitcher />
-      <ProjectSchemaNav />
+      <div className="hidden sm:contents">
+        <WorkspaceSwitcher />
+        <ProjectSchemaNav />
+      </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
         <FileText className="size-3 shrink-0 text-emerald-500" />
@@ -223,8 +225,8 @@ export default function Home() {
   };
 
   return (
-    <div className="flex h-full w-full flex-1 flex-col">
-      <header className="flex h-10 shrink-0 items-center gap-2 overflow-x-auto border-b bg-background/95 px-2 backdrop-blur-sm sm:gap-3 sm:px-3">
+    <div className="flex h-full w-full flex-1 flex-col overflow-hidden">
+      <header className="flex h-10 shrink-0 items-center gap-2 overflow-x-auto overflow-y-hidden border-b bg-background/95 px-2 backdrop-blur-sm sm:gap-3 sm:px-3">
         <Link href="/" className="shrink-0">
           <BrandLogo />
         </Link>

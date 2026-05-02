@@ -11,7 +11,6 @@ import {
   ChevronDown,
   ChevronUp,
   Check,
-  Menu,
   Keyboard,
   FileCode2,
   GitBranch,
@@ -24,62 +23,8 @@ import {
   Command,
   CircleDot,
 } from "lucide-react";
+import { Navbar } from "./navbar-client";
 import { FaqAccordion } from "./faq-client";
-
-/* ═══════════════════════════════════════════════════════════════════════════
-   NAVBAR
-   ═══════════════════════════════════════════════════════════════════════════ */
-
-function Navbar() {
-  return (
-    <nav className="fixed top-0 z-50 w-full border-b border-white/[0.06] bg-[#08081a]/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
-        <Link href="/landing" className="flex items-center gap-2.5">
-          <div className="flex size-8 items-center justify-center rounded-lg bg-violet-600/20 ring-1 ring-violet-500/30">
-            <Database className="size-4 text-violet-400" />
-          </div>
-          <span className="text-[15px] font-bold tracking-tight text-white">
-            Super Schema
-          </span>
-        </Link>
-
-        <div className="hidden items-center gap-8 md:flex">
-          {["Features", "Resources", "Testimonials", "Pricing"].map((l) => (
-            <a
-              key={l}
-              href={`#${l.toLowerCase()}`}
-              className="text-sm text-zinc-400 transition-colors hover:text-white"
-            >
-              {l}
-            </a>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-3">
-          <Link
-            href="/sign-in"
-            className="hidden rounded-lg border border-white/10 px-3.5 py-1.5 text-sm font-medium text-zinc-300 transition-colors hover:border-white/20 hover:text-white sm:block"
-          >
-            Sign In
-          </Link>
-          <Link
-            href="/sign-up"
-            className="inline-flex h-8 items-center gap-1.5 rounded-lg bg-violet-600 px-4 text-sm font-semibold text-white shadow-lg shadow-violet-600/25 transition-all hover:bg-violet-500"
-          >
-            Get Started
-          </Link>
-          <button
-            type="button"
-            className="inline-flex size-8 items-center justify-center rounded-lg bg-violet-600 text-white md:hidden"
-            aria-label="Menu"
-          >
-            <Menu className="size-4" />
-          </button>
-        </div>
-      </div>
-    </nav>
-  );
-}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    HERO — split layout: text left, app screenshot right

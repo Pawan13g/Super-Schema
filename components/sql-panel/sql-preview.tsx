@@ -133,8 +133,8 @@ export function SqlPreview() {
     <div className="flex h-full flex-col bg-card">
       <Tabs value={activeTab} onValueChange={setActiveTab} className="flex h-full flex-col gap-0">
         {/* Header with tabs and controls */}
-        <div className="flex items-center justify-between border-b px-3 py-1">
-          <TabsList className="h-6">
+        <div className="flex items-center justify-between gap-2 overflow-x-auto border-b px-3 py-1">
+          <TabsList className="h-6 shrink-0">
             <TabsTrigger value="sql" className="text-[10px] px-2 h-5 gap-1">
               <Code2 className="size-3" />
               SQL Output

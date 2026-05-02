@@ -60,7 +60,7 @@ Bugs / risks (ranked roughly by severity)
   9. Dark mode polish — fix edge label readability + table-color contrast in dark. -->
 
   Medium value, medium effort
-  10. Schema versioning — already in TASKS.md as deferred. Snapshots on each save, with diff view.
+  <!-- 10. Schema versioning — already in TASKS.md as deferred. Snapshots on each save, with diff view. -->
   11. Compare schemas — pick two schemas, see add/drop/alter list.
   12. Migration SQL generator — diff between two schemas → ALTER TABLE statements.
   13. Schema templates library — one-click "E-commerce", "SaaS", "Blog", etc. Bundled JSON.

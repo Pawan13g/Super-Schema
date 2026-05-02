@@ -870,7 +870,7 @@ export function SchemaCanvas() {
     // and render correctly; also keeps hydration stable across SSR/CSR.
     <div
       ref={wrapperRef}
-      className="relative h-full w-full min-h-[60vh]"
+      className="relative h-full w-full min-h-0"
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
@@ -957,7 +957,7 @@ export function SchemaCanvas() {
       </ReactFlow>
 
       {/* Floating toolbar — top right */}
-      <div className="pointer-events-none absolute right-3 top-3 z-10 flex gap-1.5">
+      <div className="pointer-events-none absolute right-3 top-3 z-5 flex gap-1.5">
         <Button
           size="sm"
           onClick={() => {
@@ -973,7 +973,7 @@ export function SchemaCanvas() {
           }
         >
           <Link2 className="size-3" />
-          <span className="text-xs font-medium">Add Relation</span>
+          <span className="hidden text-xs font-medium sm:inline">Add Relation</span>
         </Button>
       </div>
 
