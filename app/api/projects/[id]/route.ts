@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
+import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getProjectIfOwned } from "@/lib/authz";
@@ -77,6 +78,18 @@ export async function PATCH(
 
     return Response.json({ project });
   } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return Response.json(
+        {
+          error: "A project with that name already exists in this workspace.",
+          code: "DUPLICATE_NAME",
+        },
+        { status: 409 }
+      );
+    }
     const message = err instanceof Error ? err.message : "Update failed";
     return Response.json({ error: message }, { status: 500 });
   }

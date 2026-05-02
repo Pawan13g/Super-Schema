@@ -76,6 +76,19 @@ export async function POST(
 
     return Response.json({ schema });
   } catch (err) {
+    if (
+      err instanceof Prisma.PrismaClientKnownRequestError &&
+      err.code === "P2002"
+    ) {
+      return Response.json(
+        {
+          error:
+            "A schema with that name already exists in this project. Pick a different name.",
+          code: "DUPLICATE_NAME",
+        },
+        { status: 409 }
+      );
+    }
     const message = err instanceof Error ? err.message : "Create failed";
     return Response.json({ error: message }, { status: 500 });
   }

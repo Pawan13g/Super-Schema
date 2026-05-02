@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Logo } from "@/components/brand/logo";
 import { useWorkspace } from "@/lib/workspace-context";
 import { useIsMobile, useIsTablet } from "@/lib/use-media-query";
@@ -41,6 +40,9 @@ import { ShareDialog } from "@/components/workspace/share-dialog";
 import { ConnectDbDialog } from "@/components/workspace/connect-db-dialog";
 import { ReviewsDialog } from "@/components/workspace/reviews-dialog";
 import { TrashDialog } from "@/components/workspace/trash-dialog";
+import { ProjectsDialog } from "@/components/workspace/projects-dialog";
+import { TabBar } from "@/components/workspace/tab-bar";
+import { OnboardingLauncher } from "@/components/workspace/onboarding-launcher";
 import { SaveStatusBadge } from "@/components/workspace/save-status-badge";
 import { CollabToggle } from "@/components/workspace/collab-toggle";
 import { LocalModeBadge } from "@/components/workspace/local-mode-badge";
@@ -74,9 +76,11 @@ function BrandLogo() {
 function CanvasHeader({
   onToggleSidebar,
   sidebarCollapsed,
+  onOpenProjects,
 }: {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
+  onOpenProjects: () => void;
 }) {
   const { schemas, activeSchemaId } = useWorkspace();
   const schema = schemas.find((s) => s.id === activeSchemaId);
@@ -100,7 +104,7 @@ function CanvasHeader({
 
       <div className="hidden sm:contents">
         <WorkspaceSwitcher />
-        <ProjectSchemaNav />
+        <ProjectSchemaNav onOpenProjects={onOpenProjects} />
       </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
@@ -114,7 +118,6 @@ function CanvasHeader({
 }
 
 export default function Home() {
-  const router = useRouter();
   const sidebarRef = usePanelRef();
   const sqlPanelRef = usePanelRef();
   const aiPanelRef = usePanelRef();
@@ -229,21 +232,26 @@ export default function Home() {
     activeProjectId,
     activeWorkspaceId,
     activeSchemaId,
+    workspaces,
+    projects,
     schemas,
     createSchemaInProject,
     createProject,
-    createWorkspace,
     renameSchema,
+    switchProject,
+    switchWorkspace,
+    refreshSchemas,
+    refreshProjects,
   } = useWorkspace();
   const { schema: canvasSchema } = useSchema();
 
   const [newSchemaOpen, setNewSchemaOpen] = useState(false);
   const [newSchemaName, setNewSchemaName] = useState("");
+  const [newSchemaProjectId, setNewSchemaProjectId] = useState<string>("");
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDesc, setNewProjectDesc] = useState("");
-  const [newWorkspaceOpen, setNewWorkspaceOpen] = useState(false);
-  const [newWorkspaceName, setNewWorkspaceName] = useState("");
+  const [newProjectWorkspaceId, setNewProjectWorkspaceId] = useState<string>("");
   const [renameSchemaOpen, setRenameSchemaOpen] = useState(false);
   const [renameSchemaDraft, setRenameSchemaDraft] = useState("");
   const [addRelationOpen, setAddRelationOpen] = useState(false);
@@ -256,6 +264,8 @@ export default function Home() {
   const [connectDbOpen, setConnectDbOpen] = useState(false);
   const [reviewsOpen, setReviewsOpen] = useState(false);
   const [trashOpen, setTrashOpen] = useState(false);
+  const [projectsOpen, setProjectsOpen] = useState(false);
+  const [launcherOpen, setLauncherOpen] = useState(false);
 
   const activeSchema = schemas.find((s) => s.id === activeSchemaId);
 
@@ -275,28 +285,83 @@ export default function Home() {
 
   const handleCreateSchema = async () => {
     const name = newSchemaName.trim();
-    if (!name || !activeProjectId) return;
-    await createSchemaInProject(name);
+    const target = newSchemaProjectId || activeProjectId;
+    if (!name || !target) return;
+    if (target === activeProjectId) {
+      const created = await createSchemaInProject(name);
+      if (!created) {
+        toast.error(
+          "A schema with that name already exists. Pick a different name."
+        );
+        return;
+      }
+    } else {
+      // Different project — hit API directly, then switch.
+      const res = await fetch(`/api/projects/${target}/schemas`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(err.error ?? "Failed to create schema");
+        return;
+      }
+      const data = (await res.json()) as { schema: { id: string } };
+      await switchProject(target);
+      // switchProject auto-loads first schema; explicitly switch to ours.
+      await refreshSchemas(target);
+      // small delay so refreshSchemas state lands; switchSchema will also
+      // open it as a tab via loadSchemaIntoCanvas.
+      const wsCtx = await fetch(`/api/schemas/${data.schema.id}`);
+      if (wsCtx.ok) {
+        // No-op — switchProject already loaded a schema into the canvas;
+        // user can pick this one from the schema dropdown / tabs.
+      }
+    }
     setNewSchemaName("");
+    setNewSchemaProjectId("");
     setNewSchemaOpen(false);
   };
 
   const handleCreateProject = async () => {
     const name = newProjectName.trim();
-    if (!name || !activeWorkspaceId) return;
-    const created = await createProject(name, newProjectDesc.trim() || undefined);
+    const target = newProjectWorkspaceId || activeWorkspaceId;
+    if (!name || !target) return;
+    if (target === activeWorkspaceId) {
+      // createProject already switches to the new project + creates a default
+      // schema, dropping the user straight onto the canvas.
+      const created = await createProject(name, newProjectDesc.trim() || undefined);
+      if (!created) {
+        toast.error(
+          "A project with that name already exists in this workspace."
+        );
+        return;
+      }
+    } else {
+      const res = await fetch(`/api/projects`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          workspaceId: target,
+          name,
+          description: newProjectDesc.trim() || undefined,
+        }),
+      });
+      if (!res.ok) {
+        const err = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(err.error ?? "Failed to create project");
+        return;
+      }
+      // Switch to the target workspace (which switches to the new project as
+      // its newest entry).
+      await switchWorkspace(target);
+      await refreshProjects(target);
+    }
     setNewProjectName("");
     setNewProjectDesc("");
+    setNewProjectWorkspaceId("");
     setNewProjectOpen(false);
-    if (created) router.push(`/projects/${created.id}`);
-  };
-
-  const handleCreateWorkspace = async () => {
-    const name = newWorkspaceName.trim();
-    if (!name) return;
-    await createWorkspace(name);
-    setNewWorkspaceName("");
-    setNewWorkspaceOpen(false);
   };
 
   const handleRenameSchema = async () => {
@@ -330,10 +395,7 @@ export default function Home() {
             setNewProjectDesc("");
             setNewProjectOpen(true);
           }}
-          onNewWorkspace={() => {
-            setNewWorkspaceName("");
-            setNewWorkspaceOpen(true);
-          }}
+          onNewWorkspace={() => setLauncherOpen(true)}
           onRenameSchema={() => {
             setRenameSchemaDraft(activeSchema?.name ?? "");
             setRenameSchemaOpen(true);
@@ -349,6 +411,7 @@ export default function Home() {
           onConnectDb={() => setConnectDbOpen(true)}
           onOpenReviews={() => setReviewsOpen(true)}
           onOpenTrash={() => setTrashOpen(true)}
+          onOpenProjects={() => setProjectsOpen(true)}
           onBulkExport={async () => {
             const schemaName = activeSchema?.name?.trim() || "schema";
             const t = toast.loading("Building bulk export…");
@@ -413,7 +476,9 @@ export default function Home() {
                     <CanvasHeader
                       onToggleSidebar={toggleSidebar}
                       sidebarCollapsed={sidebarCollapsed}
+                      onOpenProjects={() => setProjectsOpen(true)}
                     />
+                    <TabBar />
                     <div className="flex-1">
                       <SchemaCanvas />
                     </div>
@@ -452,25 +517,51 @@ export default function Home() {
       </ResizablePanelGroup>
 
       <Dialog open={newSchemaOpen} onOpenChange={setNewSchemaOpen}>
-        <DialogContent className="sm:max-w-sm">
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>New schema</DialogTitle>
             <DialogDescription>
-              A schema is a canvas of tables and relations.
+              Pick a project and give the new schema a unique name within it.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-1.5 py-1">
-            <Label htmlFor="new-schema-name" className="text-xs">
-              Name
-            </Label>
-            <Input
-              id="new-schema-name"
-              autoFocus
-              value={newSchemaName}
-              onChange={(e) => setNewSchemaName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreateSchema()}
-              placeholder="e.g. v1, draft, production"
-            />
+          <div className="grid gap-3 py-1">
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-schema-project" className="text-xs">
+                Project
+              </Label>
+              <select
+                id="new-schema-project"
+                value={newSchemaProjectId || activeProjectId || ""}
+                onChange={(e) => setNewSchemaProjectId(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                {projects.length === 0 ? (
+                  <option value="">No projects in this workspace</option>
+                ) : (
+                  projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
+              <Label htmlFor="new-schema-name" className="text-xs">
+                Schema name
+              </Label>
+              <Input
+                id="new-schema-name"
+                autoFocus
+                value={newSchemaName}
+                onChange={(e) => setNewSchemaName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleCreateSchema()}
+                placeholder="e.g. v1, draft, production"
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Must be unique within the chosen project.
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setNewSchemaOpen(false)}>
@@ -478,7 +569,10 @@ export default function Home() {
             </Button>
             <Button
               onClick={handleCreateSchema}
-              disabled={!newSchemaName.trim() || !activeProjectId}
+              disabled={
+                !newSchemaName.trim() ||
+                (!newSchemaProjectId && !activeProjectId)
+              }
             >
               Create schema
             </Button>
@@ -491,13 +585,34 @@ export default function Home() {
           <DialogHeader>
             <DialogTitle>New project</DialogTitle>
             <DialogDescription>
-              Group multiple schemas under one project.
+              Pick a workspace and give the new project a unique name within it.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-1">
             <div className="grid gap-1.5">
+              <Label htmlFor="new-project-workspace" className="text-xs">
+                Workspace
+              </Label>
+              <select
+                id="new-project-workspace"
+                value={newProjectWorkspaceId || activeWorkspaceId || ""}
+                onChange={(e) => setNewProjectWorkspaceId(e.target.value)}
+                className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+              >
+                {workspaces.length === 0 ? (
+                  <option value="">No workspaces</option>
+                ) : (
+                  workspaces.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name}
+                    </option>
+                  ))
+                )}
+              </select>
+            </div>
+            <div className="grid gap-1.5">
               <Label htmlFor="new-project-name" className="text-xs">
-                Name
+                Project name
               </Label>
               <Input
                 id="new-project-name"
@@ -507,6 +622,9 @@ export default function Home() {
                 onKeyDown={(e) => e.key === "Enter" && handleCreateProject()}
                 placeholder="e.g. Billing, CRM, Analytics"
               />
+              <p className="text-[10px] text-muted-foreground">
+                Must be unique within the chosen workspace.
+              </p>
             </div>
             <div className="grid gap-1.5">
               <Label htmlFor="new-project-desc" className="text-xs">
@@ -534,40 +652,7 @@ export default function Home() {
         </DialogContent>
       </Dialog>
 
-      <Dialog open={newWorkspaceOpen} onOpenChange={setNewWorkspaceOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader>
-            <DialogTitle>New workspace</DialogTitle>
-            <DialogDescription>
-              Workspaces hold projects and schemas for different teams or apps.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-1.5 py-1">
-            <Label htmlFor="new-ws-name" className="text-xs">
-              Name
-            </Label>
-            <Input
-              id="new-ws-name"
-              autoFocus
-              value={newWorkspaceName}
-              onChange={(e) => setNewWorkspaceName(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleCreateWorkspace()}
-              placeholder="e.g. ACME Corp, Side Project"
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNewWorkspaceOpen(false)}>
-              Cancel
-            </Button>
-            <Button
-              onClick={handleCreateWorkspace}
-              disabled={!newWorkspaceName.trim()}
-            >
-              Create workspace
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OnboardingLauncher open={launcherOpen} onOpenChange={setLauncherOpen} />
 
       <Dialog open={renameSchemaOpen} onOpenChange={setRenameSchemaOpen}>
         <DialogContent className="sm:max-w-sm">
@@ -622,6 +707,11 @@ export default function Home() {
       <ReviewsDialog open={reviewsOpen} onOpenChange={setReviewsOpen} />
 
       <TrashDialog open={trashOpen} onOpenChange={setTrashOpen} />
+
+      <ProjectsDialog
+        open={projectsOpen}
+        onOpenChange={setProjectsOpen}
+      />
 
       <CommandPalette />
       <ShortcutsOverlay />

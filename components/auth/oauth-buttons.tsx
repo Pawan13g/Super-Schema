@@ -20,7 +20,7 @@ interface OAuthButtonsProps {
 const DEFAULT_DASHBOARD =
   (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
     ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
-    : "/projects";
+    : "/";
 
 export function OAuthButtons({
   callbackUrl = DEFAULT_DASHBOARD,

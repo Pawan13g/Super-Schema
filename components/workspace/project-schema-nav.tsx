@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useWorkspace } from "@/lib/workspace-context";
 import { Button } from "@/components/ui/button";
@@ -16,7 +15,11 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export function ProjectSchemaNav() {
+interface ProjectSchemaNavProps {
+  onOpenProjects?: () => void;
+}
+
+export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {}) {
   const {
     projects,
     activeProjectId,
@@ -112,14 +115,17 @@ export function ProjectSchemaNav() {
               })}
             </div>
             <div className="my-1.5 h-px bg-border" />
-            <Link
-              href="/projects"
-              onClick={() => setProjectOpen(false)}
+            <button
+              type="button"
+              onClick={() => {
+                setProjectOpen(false);
+                onOpenProjects?.();
+              }}
               className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-muted-foreground hover:bg-accent hover:text-foreground"
             >
               <LayoutDashboard className="size-3.5" />
               Manage projects
-            </Link>
+            </button>
           </div>
         )}
       </div>

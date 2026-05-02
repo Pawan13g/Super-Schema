@@ -74,6 +74,7 @@ interface AppMenubarProps {
   onConnectDb: () => void;
   onOpenReviews: () => void;
   onOpenTrash: () => void;
+  onOpenProjects: () => void;
 }
 
 export function AppMenubar({
@@ -99,6 +100,7 @@ export function AppMenubar({
   onConnectDb,
   onOpenReviews,
   onOpenTrash,
+  onOpenProjects,
 }: AppMenubarProps) {
   const { theme, setTheme } = useTheme();
   const {
@@ -178,9 +180,9 @@ export function AppMenubar({
             Connect to live DB…
           </MenubarItem>
           <MenubarSeparator />
-          <MenubarItem render={<Link href="/projects" />}>
+          <MenubarItem onClick={onOpenProjects}>
             <LayoutDashboard />
-            Projects dashboard
+            Projects…
           </MenubarItem>
           <MenubarItem onClick={onOpenTrash}>
             <Trash />
@@ -410,11 +412,9 @@ export function AppMenubar({
                 ))
               )}
               <MenubarSeparator />
-              <MenubarItem
-                render={<Link href="/projects" />}
-              >
+              <MenubarItem onClick={onOpenProjects}>
                 <ExternalLink />
-                Open dashboard
+                Manage projects…
               </MenubarItem>
             </MenubarSubContent>
           </MenubarSub>

@@ -316,7 +316,7 @@ export default function DocsPage() {
 
           {session?.user ? (
             <Link
-              href="/projects"
+              href="/"
               className="inline-flex h-9 items-center gap-1 rounded-lg bg-foreground px-3 text-xs font-medium text-background hover:opacity-90"
             >
               Open app

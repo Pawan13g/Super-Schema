@@ -86,12 +86,6 @@ export function SchemaSidebar() {
     },
     [setExpandedTableIds]
   );
-  // Top-level "Tables" header collapse.
-  const [tablesGroupOpen, setTablesGroupOpen] = useStoredState<boolean>(
-    "super-schema:sidebar-tables-group-open",
-    true,
-    { validate: (v): v is boolean => typeof v === "boolean" }
-  );
   // Active tab for the inline edit panel under the selected table.
   const [activeTab, setActiveTab] = useState<TablePanelTab>("columns");
   const [editingColumnId, setEditingColumnId] = useState<string | null>(null);
@@ -212,67 +206,51 @@ export function SchemaSidebar() {
         </Button>
       </div>
 
-      {/* Scrollable tree */}
+      {/* Scrollable tree — flat table list, no collapsible header */}
       <ScrollArea className="min-h-0 flex-1">
-        {/* Tables group header */}
-        <button
-          type="button"
-          onClick={() => setTablesGroupOpen((v) => !v)}
-          className="sticky top-0 z-10 flex w-full items-center gap-1.5 border-b bg-muted/40 px-2 py-1.5 text-left backdrop-blur"
-        >
-          {tablesGroupOpen ? (
-            <ChevronDown className="size-3 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="size-3 text-muted-foreground" />
-          )}
-          <Table2 className="size-3.5 text-foreground/70" />
-          <span className="text-[12px] font-semibold tracking-tight">
+        <div className="flex items-center gap-1.5 border-b bg-muted/30 px-3 py-1.5">
+          <Table2 className="size-3 text-muted-foreground" />
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
             Tables
           </span>
-          <span className="rounded bg-foreground/5 px-1.5 py-px text-[10px] font-medium text-muted-foreground">
+          <span className="rounded bg-foreground/5 px-1.5 py-px text-[9px] font-medium text-muted-foreground">
             {schema.tables.length}
           </span>
-          <span
-            className="ml-auto"
-            onClick={(e) => {
-              e.stopPropagation();
-              collapseAll();
-            }}
-          >
+          {schema.tables.length > 0 && (
             <Tip label="Collapse all">
-              <span
-                role="button"
-                tabIndex={0}
-                className="inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+              <button
+                type="button"
+                onClick={collapseAll}
+                className="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
               >
                 <ChevronsDownUp className="size-3" />
-              </span>
+              </button>
             </Tip>
-          </span>
-        </button>
+          )}
+        </div>
 
-        {tablesGroupOpen && (
-          <div className="py-1">
-            {workspaceLoading && filteredTables.length === 0 && (
-              <div className="space-y-1.5 px-2 py-2">
-                {[1, 2, 3, 4].map((i) => (
-                  <div
-                    key={i}
-                    className="flex items-center gap-2 rounded px-2 py-1"
-                  >
-                    <div className="size-3 animate-pulse rounded bg-muted" />
-                    <div className="h-3 flex-1 animate-pulse rounded bg-muted" />
-                  </div>
-                ))}
-              </div>
-            )}
-            {!workspaceLoading && filteredTables.length === 0 && (
-              <p className="px-4 py-8 text-center text-xs text-muted-foreground">
-                {schema.tables.length === 0
-                  ? "No tables. Click Add Table."
-                  : "No tables match search."}
-              </p>
-            )}
+        <div className="py-1">
+          {workspaceLoading && filteredTables.length === 0 && (
+            <div className="space-y-1.5 px-2 py-2">
+              {[1, 2, 3, 4].map((i) => (
+                <div
+                  key={i}
+                  className="flex items-center gap-2 rounded px-2 py-1"
+                >
+                  <div className="size-3 animate-pulse rounded bg-muted" />
+                  <div className="h-3 flex-1 animate-pulse rounded bg-muted" />
+                </div>
+              ))}
+            </div>
+          )}
+          {!workspaceLoading && filteredTables.length === 0 && (
+            <p className="px-4 py-8 text-center text-xs text-muted-foreground">
+              {schema.tables.length === 0
+                ? "No tables. Click Add Table."
+                : "No tables match search."}
+            </p>
+          )}
+          {/* SCHEMA_LIST_MARKER */}
 
             {filteredTables.map((table) => {
               const isSelected = selectedTableId === table.id;
@@ -582,8 +560,7 @@ export function SchemaSidebar() {
                 </div>
               );
             })}
-          </div>
-        )}
+        </div>
       </ScrollArea>
 
       <ConfirmDialog

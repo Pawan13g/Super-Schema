@@ -20,7 +20,7 @@ interface OAuthAvailability {
 const DEFAULT_DASHBOARD =
   (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
     ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
-    : "/projects";
+    : "/";
 
 function safeCallback(raw: string | null): string {
   if (!raw) return DEFAULT_DASHBOARD;

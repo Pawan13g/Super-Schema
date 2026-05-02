@@ -27,11 +27,11 @@ export function AuthShell({
     <div
       className={
         accent === "rose"
-          ? "flex min-h-screen items-center justify-center bg-gradient-to-br from-rose-950 via-rose-900 to-violet-950 p-4 sm:p-8"
-          : "flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 p-4 sm:p-8"
+          ? "flex min-h-screen items-center justify-center bg-gradient-to-br from-rose-950 via-rose-900 to-violet-950"
+          : "flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900"
       }
     >
-      <div className="grid w-full max-w-6xl overflow-hidden rounded-3xl bg-card shadow-2xl ring-1 ring-foreground/10 lg:grid-cols-2">
+      <div className="grid w-full w-full h-screen overflow-hidden bg-card shadow-2xl ring-1 ring-foreground/10 lg:grid-cols-2">
         <ImagePanel tagline={tagline} quote={quote} accent={accent} />
         <div className="flex flex-col justify-center p-6 sm:p-10 lg:p-12">
           {children}

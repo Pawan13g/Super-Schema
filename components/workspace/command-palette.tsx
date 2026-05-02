@@ -40,10 +40,24 @@ export function CommandPalette() {
     schemas,
     activeSchemaId,
     switchSchema,
+    switchProject,
+    activeProjectId,
     projects,
     workspaces,
   } = useWorkspace();
   const { schema, setSelectedTableId } = useSchema();
+
+  // All schemas the user owns across every project, fetched lazily on first
+  // palette open. Powers cross-project schema jump.
+  interface CrossSchema {
+    id: string;
+    name: string;
+    projectId: string;
+    projectName: string;
+    workspaceId: string;
+    workspaceName: string;
+  }
+  const [allSchemas, setAllSchemas] = useState<CrossSchema[]>([]);
 
   // Cmd/Ctrl+K toggles open
   useEffect(() => {
@@ -63,6 +77,18 @@ export function CommandPalette() {
       setQuery("");
       // Defer focus until after the dialog mounts
       requestAnimationFrame(() => inputRef.current?.focus());
+      // Refresh the cross-schema list every time the palette opens so newly
+      // created/renamed schemas show up without a page reload.
+      void (async () => {
+        try {
+          const res = await fetch("/api/schemas");
+          if (!res.ok) return;
+          const data = (await res.json()) as { schemas: CrossSchema[] };
+          setAllSchemas(data.schemas);
+        } catch {
+          /* ignore */
+        }
+      })();
     }
   }, [open]);
 
@@ -99,27 +125,27 @@ export function CommandPalette() {
       });
     });
 
-    // Other schemas in this project
-    schemas.forEach((s) => {
+    // Every schema the user owns — across projects + workspaces. Switching
+    // hops the project and opens the schema in a new tab.
+    allSchemas.forEach((s) => {
       if (s.id === activeSchemaId) return;
       list.push({
         id: `schema:${s.id}`,
         kind: "schema",
         title: s.name,
-        subtitle: "Schema · switch",
-        run: () => switchSchema(s.id),
+        subtitle: `Schema · ${s.projectName}`,
+        hint: s.workspaceName,
+        run: async () => {
+          if (s.projectId !== activeProjectId) {
+            await switchProject(s.projectId);
+          }
+          await switchSchema(s.id);
+        },
       });
     });
 
     // Static pages
     list.push(
-      {
-        id: "page:projects",
-        kind: "page",
-        title: "Projects dashboard",
-        subtitle: "Page",
-        run: () => router.push("/projects"),
-      },
       {
         id: "page:settings",
         kind: "page",
@@ -148,8 +174,11 @@ export function CommandPalette() {
     schema,
     schemas,
     activeSchemaId,
+    activeProjectId,
     projects,
+    allSchemas,
     switchSchema,
+    switchProject,
     setSelectedTableId,
     router,
   ]);

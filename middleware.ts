@@ -59,7 +59,7 @@ export default auth((req) => {
     const dashboard =
       (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
         ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
-        : "/projects";
+        : "/";
     return NextResponse.redirect(new URL(dashboard, req.url));
   }
 

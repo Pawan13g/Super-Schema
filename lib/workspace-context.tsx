@@ -41,6 +41,13 @@ export interface SchemaMeta {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+export interface SchemaTab {
+  schemaId: string;
+  schemaName: string;
+  projectId: string;
+  projectName: string;
+}
+
 interface WorkspaceStore {
   workspaces: WorkspaceMeta[];
   activeWorkspaceId: string | null;
@@ -72,12 +79,20 @@ interface WorkspaceStore {
   refreshProjects: (workspaceId: string) => Promise<ProjectMeta[] | undefined>;
   refreshSchemas: (projectId: string) => Promise<SchemaMeta[] | undefined>;
   saveNow: () => Promise<void>;
+
+  // VSCode-style schema tabs. Multiple schemas (possibly from different
+  // projects) stay open at once; the active tab drives the canvas.
+  openTabs: SchemaTab[];
+  closeTab: (schemaId: string) => void;
+  closeOtherTabs: (schemaId: string) => void;
+  closeAllTabs: () => void;
 }
 
 const WorkspaceContext = createContext<WorkspaceStore | null>(null);
 const ACTIVE_WORKSPACE_KEY = "super-schema:active-workspace";
 const ACTIVE_PROJECT_KEY = "super-schema:active-project";
 const ACTIVE_SCHEMA_KEY = "super-schema:active-schema";
+const TABS_KEY = "super-schema:tabs";
 const DEBOUNCE_MS = 1000;
 
 function projectKey(workspaceId: string) {
@@ -85,6 +100,39 @@ function projectKey(workspaceId: string) {
 }
 function schemaKey(projectId: string) {
   return `${ACTIVE_SCHEMA_KEY}:${projectId}`;
+}
+function tabsKey(workspaceId: string) {
+  return `${TABS_KEY}:${workspaceId}`;
+}
+
+function readStoredTabs(workspaceId: string): SchemaTab[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(tabsKey(workspaceId));
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is SchemaTab =>
+        !!t &&
+        typeof t === "object" &&
+        typeof (t as SchemaTab).schemaId === "string" &&
+        typeof (t as SchemaTab).schemaName === "string" &&
+        typeof (t as SchemaTab).projectId === "string" &&
+        typeof (t as SchemaTab).projectName === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredTabs(workspaceId: string, tabs: SchemaTab[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(tabsKey(workspaceId), JSON.stringify(tabs));
+  } catch {
+    /* quota — drop */
+  }
 }
 
 export function WorkspaceProvider({ children }: { children: ReactNode }) {
@@ -96,6 +144,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [schemas, setSchemas] = useState<SchemaMeta[]>([]);
   const [activeSchemaId, setActiveSchemaId] = useState<string | null>(null);
+  const [openTabs, setOpenTabs] = useState<SchemaTab[]>([]);
   const [loading, setLoading] = useState(true);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
 
@@ -139,13 +188,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`/api/schemas/${id}`);
       if (!res.ok) return false;
       const data = (await res.json()) as {
-        schema: { id: string; schemaJson: Schema };
+        schema: {
+          id: string;
+          name: string;
+          projectId: string;
+          schemaJson: Schema;
+        };
+        project: { id: string; name: string };
       };
       skipNextAutosaveRef.current = true;
       lastSavedSchemaRef.current = JSON.stringify(data.schema.schemaJson);
       replaceSchema(data.schema.schemaJson);
       setActiveSchemaId(id);
       activeSchemaIdRef.current = id;
+      // Open or activate this schema as a tab. Limit to 12 tabs to avoid
+      // unbounded localStorage growth.
+      setOpenTabs((prev) => {
+        const tab: SchemaTab = {
+          schemaId: id,
+          schemaName: data.schema.name,
+          projectId: data.schema.projectId,
+          projectName: data.project.name,
+        };
+        const existing = prev.findIndex((t) => t.schemaId === id);
+        if (existing >= 0) {
+          // Update name in case it was renamed elsewhere.
+          const next = [...prev];
+          next[existing] = tab;
+          return next;
+        }
+        const next = [...prev, tab];
+        return next.length > 12 ? next.slice(next.length - 12) : next;
+      });
       return true;
     },
     [replaceSchema]
@@ -187,6 +261,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         return;
       }
       setActiveWorkspaceId(wsId);
+      // Restore persisted tab strip for this workspace.
+      setOpenTabs(readStoredTabs(wsId));
       if (typeof window !== "undefined") {
         localStorage.setItem(ACTIVE_WORKSPACE_KEY, wsId);
       }
@@ -310,10 +386,71 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     [refreshSchemas, loadSchemaIntoCanvas, activeWorkspaceId, replaceSchema]
   );
 
+  // Persist the tab strip for the active workspace whenever it mutates.
+  useEffect(() => {
+    if (!activeWorkspaceId) return;
+    writeStoredTabs(activeWorkspaceId, openTabs);
+  }, [activeWorkspaceId, openTabs]);
+
+  const closeTab = useCallback(
+    (schemaId: string) => {
+      setOpenTabs((prev) => {
+        const idx = prev.findIndex((t) => t.schemaId === schemaId);
+        if (idx === -1) return prev;
+        const next = prev.filter((t) => t.schemaId !== schemaId);
+        // If the active tab was the one being closed, jump to the neighbor.
+        if (
+          activeSchemaIdRef.current === schemaId &&
+          next.length > 0
+        ) {
+          const fallback = next[Math.min(idx, next.length - 1)];
+          // Defer the switch so React commits the tab removal first.
+          queueMicrotask(() => {
+            void loadSchemaIntoCanvas(fallback.schemaId).then(() => {
+              if (
+                fallback.projectId &&
+                activeProjectId !== fallback.projectId &&
+                typeof window !== "undefined"
+              ) {
+                // If the tab is in a different project, sync the active
+                // project id so the project nav stays accurate.
+                setActiveProjectId(fallback.projectId);
+                localStorage.setItem(
+                  projectKey(activeWorkspaceId ?? ""),
+                  fallback.projectId
+                );
+              }
+            });
+          });
+        } else if (next.length === 0) {
+          // No tabs left — clear the canvas.
+          setActiveSchemaId(null);
+          activeSchemaIdRef.current = null;
+          replaceSchema({ tables: [], relations: [] });
+        }
+        return next;
+      });
+    },
+    [activeProjectId, activeWorkspaceId, loadSchemaIntoCanvas, replaceSchema]
+  );
+
+  const closeOtherTabs = useCallback((schemaId: string) => {
+    setOpenTabs((prev) => prev.filter((t) => t.schemaId === schemaId));
+  }, []);
+
+  const closeAllTabs = useCallback(() => {
+    setOpenTabs([]);
+    setActiveSchemaId(null);
+    activeSchemaIdRef.current = null;
+    replaceSchema({ tables: [], relations: [] });
+  }, [replaceSchema]);
+
   const switchWorkspace = useCallback(
     async (id: string) => {
       cancelPendingSave();
       setActiveWorkspaceId(id);
+      // Tabs are scoped per-workspace.
+      setOpenTabs(readStoredTabs(id));
       if (typeof window !== "undefined") {
         localStorage.setItem(ACTIVE_WORKSPACE_KEY, id);
       }
@@ -468,7 +605,13 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name }),
       });
-      if (res.ok && activeProjectId) await refreshSchemas(activeProjectId);
+      if (res.ok) {
+        if (activeProjectId) await refreshSchemas(activeProjectId);
+        // Update the tab label live.
+        setOpenTabs((prev) =>
+          prev.map((t) => (t.schemaId === id ? { ...t, schemaName: name } : t))
+        );
+      }
     },
     [refreshSchemas, activeProjectId]
   );
@@ -479,6 +622,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       const res = await fetch(`/api/schemas/${id}`, { method: "DELETE" });
       if (!res.ok) return;
       const list = (await refreshSchemas(activeProjectId)) ?? [];
+      // Remove the deleted schema's tab.
+      setOpenTabs((prev) => prev.filter((t) => t.schemaId !== id));
       if (id === activeSchemaId) {
         const next = list[0]?.id;
         if (next) await switchSchema(next);
@@ -655,6 +800,10 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         refreshProjects,
         refreshSchemas,
         saveNow,
+        openTabs,
+        closeTab,
+        closeOtherTabs,
+        closeAllTabs,
       }}
     >
       {children}

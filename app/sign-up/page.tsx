@@ -81,7 +81,7 @@ export default function SignUpPage() {
     const dashboard =
       (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD ?? "").startsWith("/")
         ? (process.env.NEXT_PUBLIC_DEFAULT_DASHBOARD as string)
-        : "/projects";
+        : "/";
     await signIn("credentials", {
       email: email.trim().toLowerCase(),
       password,
@@ -301,7 +301,7 @@ function SocialButtons({ availability }: { availability: OAuthAvailability }) {
   ) => {
     setPending(provider);
     try {
-      await signIn(provider, { callbackUrl: "/projects" });
+      await signIn(provider, { callbackUrl: "/" });
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign-in failed");
       setPending(null);

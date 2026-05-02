@@ -101,6 +101,7 @@ model Project {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   schemas   Schema[]
 
+  @@unique([workspaceId, name])
   @@index([workspaceId])
   @@index([deletedAt])
 }
@@ -121,6 +122,7 @@ model Schema {
   shares   SchemaShare[]
   reviews  SchemaReview[]
 
+  @@unique([projectId, name])
   @@index([projectId])
   @@index([deletedAt])
 }
