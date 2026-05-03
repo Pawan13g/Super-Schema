@@ -886,8 +886,9 @@ export function SchemaCanvas() {
         nodesDraggable={interactive}
         nodesConnectable={interactive}
         elementsSelectable={interactive}
-        panOnDrag={interactive ? [1, 2] : false}
-        selectionOnDrag={interactive}
+        panOnDrag={interactive ? [0, 1, 2] : false}
+        selectionOnDrag={false}
+        selectionKeyCode="Control"
         multiSelectionKeyCode={["Shift", "Meta", "Control"]}
         zoomOnScroll={interactive}
         zoomOnPinch={interactive}
