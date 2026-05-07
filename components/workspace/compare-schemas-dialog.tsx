@@ -258,6 +258,9 @@ export function CompareSchemasDialog({
               <TabsTrigger value="mssql" className="h-5 px-2 text-[10px]">
                 SQL Server
               </TabsTrigger>
+              <TabsTrigger value="oracle" className="h-5 px-2 text-[10px]">
+                Oracle
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>

@@ -210,6 +210,64 @@ export function lintSchema(schema: Schema): LintIssue[] {
     }
   });
 
+  // FK cycle detection. A → B → A (or longer) is valid SQL but almost
+  // always a design smell — inserts need deferred constraints to land
+  // and reasoning about ON DELETE behaviour gets tricky. Flag as a
+  // warning, not an error, so users can keep cycles when intentional.
+  // Tarjan-lite via DFS with a path stack; emits one warning per detected
+  // cycle, naming the involved tables.
+  const adj = new Map<string, string[]>();
+  for (const t of schema.tables) adj.set(t.id, []);
+  for (const r of schema.relations) {
+    if (r.sourceTable === r.targetTable) continue; // self-loop is its own thing
+    if (adj.has(r.sourceTable)) adj.get(r.sourceTable)!.push(r.targetTable);
+  }
+  const visited = new Set<string>();
+  const onStack = new Set<string>();
+  const stack: string[] = [];
+  const reportedCycles = new Set<string>();
+  const tableNameById = new Map(schema.tables.map((t) => [t.id, t.name]));
+
+  function dfs(node: string) {
+    visited.add(node);
+    onStack.add(node);
+    stack.push(node);
+    for (const next of adj.get(node) ?? []) {
+      if (!visited.has(next)) {
+        dfs(next);
+      } else if (onStack.has(next)) {
+        // Found a back-edge — extract the cycle nodes from the stack.
+        const startIdx = stack.indexOf(next);
+        if (startIdx >= 0) {
+          const cycle = stack.slice(startIdx);
+          // Canonicalize so A→B→A and B→A→B don't both report.
+          const min = cycle.reduce((m, n) => (n < m ? n : m), cycle[0]);
+          const rotIdx = cycle.indexOf(min);
+          const rotated = [...cycle.slice(rotIdx), ...cycle.slice(0, rotIdx)];
+          const key = rotated.join(">");
+          if (!reportedCycles.has(key)) {
+            reportedCycles.add(key);
+            const names = rotated
+              .map((id) => tableNameById.get(id) ?? id)
+              .concat(tableNameById.get(rotated[0]) ?? rotated[0])
+              .join(" → ");
+            issues.push({
+              id: `cycle-${key}`,
+              severity: "warning",
+              rule: "fk-cycle",
+              message: `Foreign-key cycle detected: ${names}. Cycles work but require deferred constraints on insert and complicate ON DELETE behaviour — consider breaking the loop.`,
+            });
+          }
+        }
+      }
+    }
+    onStack.delete(node);
+    stack.pop();
+  }
+  for (const t of schema.tables) {
+    if (!visited.has(t.id)) dfs(t.id);
+  }
+
   return issues;
 }
 

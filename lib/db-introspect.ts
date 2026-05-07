@@ -12,7 +12,7 @@ import type {
 } from "./types";
 import { TABLE_COLORS } from "./types";
 
-export type IntrospectDialect = "postgresql" | "mysql" | "mssql";
+export type IntrospectDialect = "postgresql" | "mysql" | "mssql" | "oracle";
 
 const MAX_TABLES = 200;
 const CONN_TIMEOUT_MS = 8000;
@@ -38,17 +38,26 @@ function mapDbType(raw: string): ColumnType {
   if (t.includes("smallserial") || t.includes("smallint") || t === "tinyint")
     return "SMALLINT";
   if (t.includes("serial")) return "SERIAL";
-  if (t.includes("int")) return "INT";
-  if (t.includes("double") || t.includes("real")) return "DOUBLE";
+  if (
+    t === "binary_double" ||
+    t === "binary_float" ||
+    t.includes("double") ||
+    t.includes("real")
+  )
+    return t.includes("float") || t === "binary_float" ? "FLOAT" : "DOUBLE";
   if (t.includes("float")) return "FLOAT";
-  if (t.includes("decimal") || t.includes("numeric") || t.includes("money"))
+  if (t.includes("decimal") || t.includes("numeric") || t.includes("money") || t === "number")
     return "DECIMAL";
+  if (t.includes("int")) return "INT";
   if (t.includes("bool") || t === "tinyint(1)" || t === "bit") return "BOOLEAN";
   if (t.includes("jsonb") || t.includes("json")) return "JSON";
   if (
     t.includes("blob") ||
     t.includes("bytea") ||
     t.includes("varbinary") ||
+    t === "raw" ||
+    t === "long raw" ||
+    t === "bfile" ||
     t === "image" ||
     t === "rowversion"
   )
@@ -57,8 +66,11 @@ function mapDbType(raw: string): ColumnType {
   if (t.includes("datetime")) return "DATETIME";
   if (t.includes("date")) return "DATE";
   if (t.includes("time")) return "TIME";
-  if (t.includes("text") || t.includes("ntext")) return "TEXT";
+  // Oracle CLOB / NCLOB are large text.
+  if (t.includes("clob") || t.includes("text") || t.includes("ntext")) return "TEXT";
   if (t.includes("char")) return "VARCHAR";
+  // Oracle bare NUMBER → DECIMAL (covered above), VARCHAR2 → handled below.
+  if (t.includes("varchar")) return "VARCHAR";
   return "VARCHAR";
 }
 
@@ -442,6 +454,181 @@ function parseMssqlConn(input: string): Record<string, unknown> {
   return opts;
 }
 
+// ─── Oracle (oracledb thin mode) ───────────────────────────────────────
+
+async function introspectOracle(connectionString: string): Promise<Schema> {
+  // Lazy-import so the package isn't pulled into bundles where it isn't
+  // used. oracledb 6+ defaults to "thin mode" — pure JS, no Instant Client
+  // required — which is what we want.
+  // No published @types package; cast through the loose shape we use.
+  type OracleConn = {
+    execute: (
+      sql: string,
+      bindParams?: unknown,
+      options?: { outFormat?: number }
+    ) => Promise<{ rows?: Record<string, unknown>[] }>;
+    close: () => Promise<void>;
+  };
+  type OracleDb = {
+    OUT_FORMAT_OBJECT: number;
+    getConnection: (cfg: unknown) => Promise<OracleConn>;
+  };
+  // @ts-expect-error -- no @types/oracledb published; we type the surface
+  // we use via OracleDb / OracleConn above.
+  const mod = (await import("oracledb")) as unknown as { default: OracleDb };
+  const oracledb = mod.default;
+
+  const config = parseOracleConn(connectionString);
+  const pool = await oracledb.getConnection(config);
+  try {
+    type Row = Record<string, unknown>;
+    const exec = async (sql: string): Promise<Row[]> => {
+      const r = await pool.execute(sql, [], {
+        outFormat: oracledb.OUT_FORMAT_OBJECT,
+      });
+      return (r.rows ?? []) as Row[];
+    };
+
+    // user_tab_columns lists columns owned by the connected user — same
+    // semantics as `current_schema()` in Postgres. We deliberately scope
+    // to the user's own schema; cross-schema introspection requires
+    // privileges most app users don't have.
+    const colRows = await exec(
+      `SELECT
+         table_name AS "table_name",
+         column_name AS "column_name",
+         data_type AS "data_type",
+         data_length AS "data_length",
+         nullable AS "nullable",
+         data_default AS "column_default",
+         identity_column AS "is_identity"
+       FROM user_tab_columns
+       ORDER BY table_name, column_id`
+    );
+
+    const conRows = await exec(
+      `SELECT
+         c.table_name AS "table_name",
+         cc.column_name AS "column_name",
+         c.constraint_type AS "constraint_type"
+       FROM user_constraints c
+       JOIN user_cons_columns cc ON cc.constraint_name = c.constraint_name
+       WHERE c.constraint_type IN ('P','U')`
+    );
+
+    const fkRows = await exec(
+      `SELECT
+         c.table_name AS "src_table",
+         cc.column_name AS "src_column",
+         rcc.table_name AS "tgt_table",
+         rcc.column_name AS "tgt_column"
+       FROM user_constraints c
+       JOIN user_cons_columns cc
+         ON cc.constraint_name = c.constraint_name
+       JOIN user_cons_columns rcc
+         ON rcc.constraint_name = c.r_constraint_name
+        AND rcc.position = cc.position
+       WHERE c.constraint_type = 'R'`
+    );
+
+    const idxRows = await exec(
+      `SELECT
+         i.table_name AS "table_name",
+         i.index_name AS "index_name",
+         ic.column_name AS "column_name",
+         CASE WHEN i.uniqueness = 'UNIQUE' THEN 1 ELSE 0 END AS "is_unique",
+         CASE WHEN c.constraint_type = 'P' THEN 1 ELSE 0 END AS "is_primary"
+       FROM user_indexes i
+       JOIN user_ind_columns ic
+         ON ic.index_name = i.index_name
+       LEFT JOIN user_constraints c
+         ON c.index_name = i.index_name
+       ORDER BY i.table_name, i.index_name, ic.column_position`
+    );
+
+    const cols = colRows.map((r) => ({
+      table_name: String(r.table_name),
+      column_name: String(r.column_name),
+      data_type: String(r.data_type),
+      is_nullable: String(r.nullable) === "Y" ? "YES" : "NO",
+      column_default:
+        r.column_default == null ? null : String(r.column_default).trim(),
+      extra: String(r.is_identity ?? "").toUpperCase() === "YES" ? "auto_increment" : "",
+    }));
+
+    return assembleSchema(
+      cols,
+      conRows.map((r) => ({
+        table_name: String(r.table_name),
+        column_name: String(r.column_name),
+        // Oracle uses 'P' / 'U' single-letter codes — normalize.
+        constraint_type:
+          String(r.constraint_type) === "P" ? "PRIMARY KEY" : "UNIQUE",
+      })),
+      fkRows.map((r) => ({
+        src_table: String(r.src_table),
+        src_column: String(r.src_column),
+        tgt_table: String(r.tgt_table),
+        tgt_column: String(r.tgt_column),
+      })),
+      idxRows.map((r) => ({
+        table_name: String(r.table_name),
+        index_name: String(r.index_name),
+        column_name: String(r.column_name),
+        is_unique: Number(r.is_unique) === 1,
+        is_primary: Number(r.is_primary) === 1,
+      }))
+    );
+  } finally {
+    await pool.close().catch(() => {});
+  }
+}
+
+// Accepts:
+//  - URL form:  oracle://user:pass@host:1521/SERVICE_NAME
+//  - "easy connect": user/pass@host:1521/SERVICE_NAME
+//  - ADO-ish:   User Id=u;Password=p;Data Source=host:1521/SERVICE_NAME
+function parseOracleConn(input: string): {
+  user: string;
+  password: string;
+  connectString: string;
+} {
+  const trimmed = input.trim();
+
+  if (/^oracle(?:db)?:\/\//i.test(trimmed)) {
+    const url = new URL(trimmed.replace(/^oracle(?:db)?:\/\//i, "http://"));
+    const user = decodeURIComponent(url.username || "");
+    const password = decodeURIComponent(url.password || "");
+    const port = url.port ? `:${url.port}` : "";
+    const service = url.pathname.replace(/^\//, "") || "XEPDB1";
+    return {
+      user,
+      password,
+      connectString: `${url.hostname}${port}/${service}`,
+    };
+  }
+
+  // Easy-connect: user/pass@host:port/service
+  const easy = trimmed.match(/^([^/]+)\/([^@]+)@(.+)$/);
+  if (easy) {
+    return { user: easy[1], password: easy[2], connectString: easy[3] };
+  }
+
+  // ADO-style.
+  const map = new Map<string, string>();
+  for (const p of trimmed.split(";").map((s) => s.trim()).filter(Boolean)) {
+    const eq = p.indexOf("=");
+    if (eq < 0) continue;
+    map.set(p.slice(0, eq).trim().toLowerCase(), p.slice(eq + 1).trim());
+  }
+  return {
+    user: map.get("user id") ?? map.get("uid") ?? map.get("user") ?? "",
+    password: map.get("password") ?? map.get("pwd") ?? "",
+    connectString:
+      map.get("data source") ?? map.get("connect_string") ?? "localhost/XEPDB1",
+  };
+}
+
 // ─── Assembly ───────────────────────────────────────────────────────────
 
 function assembleSchema(
@@ -605,5 +792,6 @@ export async function introspectDatabase(
 ): Promise<Schema> {
   if (dialect === "postgresql") return introspectPostgres(connectionString);
   if (dialect === "mssql") return introspectMssql(connectionString);
+  if (dialect === "oracle") return introspectOracle(connectionString);
   return introspectMysql(connectionString);
 }

@@ -30,7 +30,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-type Dialect = "postgresql" | "mysql" | "mssql";
+type Dialect = "postgresql" | "mysql" | "mssql" | "oracle";
 
 interface ConnectDbDialogProps {
   open: boolean;
@@ -41,6 +41,8 @@ const PLACEHOLDER: Record<Dialect, string> = {
   postgresql: "postgres://user:pass@host:5432/dbname",
   mysql: "mysql://user:pass@host:3306/dbname",
   mssql: "mssql://user:pass@host:1433/dbname  or  Server=host,1433;Database=db;User Id=u;Password=p",
+  oracle:
+    "oracle://user:pass@host:1521/SERVICE_NAME  or  user/pass@host:1521/SERVICE_NAME",
 };
 
 export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
@@ -143,9 +145,9 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
             Connect to live database
           </DialogTitle>
           <DialogDescription>
-            Read schema from a running PostgreSQL, MySQL, or SQL Server instance.
-            Read-only — credentials are used once for the connection and never
-            stored.
+            Read schema from a running PostgreSQL, MySQL, SQL Server, or
+            Oracle instance. Read-only — credentials are used once for the
+            connection and never stored.
           </DialogDescription>
         </DialogHeader>
 
@@ -162,9 +164,21 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
                   <Database className="size-3" />
                   MySQL
                 </TabsTrigger>
-                <TabsTrigger value="mssql" className="gap-1 px-3 text-xs">
+                <TabsTrigger
+                  value="mssql"
+                  className="gap-1 px-3 text-xs"
+                  title="SQL Server / Azure SQL. Accepts a URL (mssql://user:pass@host:1433/db) or an ADO-style string (Server=host,1433;Database=db;User Id=u;Password=p)."
+                >
                   <Database className="size-3" />
                   SQL Server
+                </TabsTrigger>
+                <TabsTrigger
+                  value="oracle"
+                  className="gap-1 px-3 text-xs"
+                  title="Oracle Database. Accepts a URL (oracle://user:pass@host:1521/SERVICE_NAME) or easy-connect (user/pass@host:1521/SERVICE_NAME). Uses oracledb thin mode — no Instant Client install required."
+                >
+                  <Database className="size-3" />
+                  Oracle
                 </TabsTrigger>
               </TabsList>
             </Tabs>
@@ -207,6 +221,16 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
               Sent over HTTPS to your Super Schema server, used to make a single
               read-only connection, then discarded. Not persisted.
             </p>
+            {dialect === "mssql" && conn.trim() && !/(?:^|;|\?|&)\s*encrypt\s*=/i.test(conn) && (
+              <p className="flex items-start gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/[0.05] px-2 py-1.5 text-[10px] text-amber-700 dark:text-amber-400">
+                <AlertTriangle className="mt-0.5 size-3 shrink-0" />
+                Connection string omits <code>Encrypt</code> /{" "}
+                <code>TrustServerCertificate</code>. We default to{" "}
+                <code>Encrypt=true; TrustServerCertificate=true</code> for
+                local dev convenience — explicitly set them in production
+                so the certificate chain is actually verified.
+              </p>
+            )}
           </div>
 
           {preview && (

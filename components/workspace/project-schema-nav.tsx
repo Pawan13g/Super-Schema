@@ -3,8 +3,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useWorkspace } from "@/lib/workspace-context";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Check,
   ChevronDown,
@@ -18,6 +16,11 @@ import { cn } from "@/lib/utils";
 
 interface ProjectSchemaNavProps {
   onOpenProjects?: () => void;
+  // Optional callback to open the modal "New schema" dialog (the same one
+  // wired to File → New schema). When provided, the breadcrumb's "+ New
+  // schema" item closes the popover and calls this instead of switching
+  // to the inline input row.
+  onNewSchema?: () => void;
 }
 
 interface Anchor {
@@ -25,7 +28,10 @@ interface Anchor {
   top: number;
 }
 
-export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {}) {
+export function ProjectSchemaNav({
+  onOpenProjects,
+  onNewSchema,
+}: ProjectSchemaNavProps = {}) {
   const {
     projects,
     activeProjectId,
@@ -33,14 +39,11 @@ export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {})
     activeSchemaId,
     switchProject,
     switchSchema,
-    createSchemaInProject,
     loading,
   } = useWorkspace();
 
   const [projectOpen, setProjectOpen] = useState(false);
   const [schemaOpen, setSchemaOpen] = useState(false);
-  const [newSchemaMode, setNewSchemaMode] = useState(false);
-  const [newSchemaName, setNewSchemaName] = useState("");
   const projectBtnRef = useRef<HTMLButtonElement>(null);
   const schemaBtnRef = useRef<HTMLButtonElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
@@ -67,8 +70,6 @@ export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {})
         schemaMenuRef.current?.contains(t) === false
       ) {
         setSchemaOpen(false);
-        setNewSchemaMode(false);
-        setNewSchemaName("");
       }
     };
     document.addEventListener("mousedown", handle);
@@ -115,14 +116,6 @@ export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {})
     setProjectOpen(false);
   };
 
-  const handleCreateSchema = async () => {
-    const name = newSchemaName.trim();
-    if (!name) return;
-    await createSchemaInProject(name);
-    setNewSchemaName("");
-    setNewSchemaMode(false);
-    setSchemaOpen(false);
-  };
 
   return (
     <div className="flex items-center gap-0">
@@ -258,41 +251,17 @@ export function ProjectSchemaNav({ onOpenProjects }: ProjectSchemaNavProps = {})
               })}
             </div>
             <div className="my-1.5 h-px bg-border" />
-            {newSchemaMode ? (
-              <div className="flex gap-1.5 px-1">
-                <Input
-                  autoFocus
-                  value={newSchemaName}
-                  onChange={(e) => setNewSchemaName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCreateSchema();
-                    if (e.key === "Escape") {
-                      setNewSchemaMode(false);
-                      setNewSchemaName("");
-                    }
-                  }}
-                  placeholder="Schema name"
-                  className="h-7 flex-1 text-xs"
-                />
-                <Button
-                  size="sm"
-                  className="h-7 px-2.5"
-                  onClick={handleCreateSchema}
-                  disabled={!newSchemaName.trim()}
-                >
-                  Add
-                </Button>
-              </div>
-            ) : (
-              <button
-                onClick={() => setNewSchemaMode(true)}
-                disabled={!activeProjectId}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-primary hover:bg-accent"
-              >
-                <Plus className="size-3.5" />
-                New schema
-              </button>
-            )}
+            <button
+              onClick={() => {
+                setSchemaOpen(false);
+                onNewSchema?.();
+              }}
+              disabled={!activeProjectId || !onNewSchema}
+              className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sm text-primary hover:bg-accent disabled:opacity-50"
+            >
+              <Plus className="size-3.5" />
+              New schema…
+            </button>
           </div>,
           document.body
         )}

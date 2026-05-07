@@ -1,5 +1,44 @@
+import { z } from "zod";
 import type { Schema, Table, Column, Relation, ColumnType, ColumnConstraint } from "./types";
-import { TABLE_COLORS } from "./types";
+import { COLUMN_CONSTRAINTS, COLUMN_TYPES, TABLE_COLORS } from "./types";
+
+// Runtime shape check for templates. The bundled `SCHEMA_TEMPLATES` array
+// is hand-written and trusted, but `templateToSchema` is also reachable
+// from any future "user-provided template JSON" flow. Validating here
+// prevents a malformed template from putting bad data into the canvas.
+const constraintZ = z.enum(
+  COLUMN_CONSTRAINTS as unknown as readonly [string, ...string[]]
+);
+const typeZ = z.enum(
+  COLUMN_TYPES as unknown as readonly [string, ...string[]]
+);
+const templateColumnZ = z.object({
+  name: z.string().min(1),
+  type: typeZ,
+  constraints: z.array(constraintZ).optional(),
+  comment: z.string().optional(),
+  defaultValue: z.string().optional(),
+});
+const templateTableZ = z.object({
+  name: z.string().min(1),
+  comment: z.string().optional(),
+  columns: z.array(templateColumnZ).min(1),
+});
+const templateRelationZ = z.object({
+  source: z.string().min(1),
+  sourceColumn: z.string().min(1),
+  target: z.string().min(1),
+  targetColumn: z.string().min(1),
+  type: z.enum(["one-to-one", "one-to-many", "many-to-many"]),
+});
+export const schemaTemplateZ = z.object({
+  id: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string(),
+  tags: z.array(z.string()),
+  tables: z.array(templateTableZ).min(1),
+  relations: z.array(templateRelationZ),
+});
 
 export interface TemplateColumn {
   name: string;
@@ -391,6 +430,19 @@ const GRID_Y = 280;
 const COLS = 3;
 
 export function templateToSchema(template: SchemaTemplate): Schema {
+  // Validate the template shape before consuming it. Throws a clear error
+  // if a third-party / user-provided template has a bad field — better
+  // than crashing the canvas with `undefined.map` deep in render.
+  const parsed = schemaTemplateZ.safeParse(template);
+  if (!parsed.success) {
+    const first = parsed.error.issues[0];
+    throw new Error(
+      `Invalid schema template "${template?.id ?? "<no-id>"}": ${
+        first?.path.join(".") || "<root>"
+      } — ${first?.message ?? "shape mismatch"}`
+    );
+  }
+
   const tableIdByName = new Map<string, string>();
   const colIdByTableCol = new Map<string, Map<string, string>>();
 

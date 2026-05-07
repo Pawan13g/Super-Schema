@@ -18,6 +18,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsDownUp,
+  ChevronsUpDown,
   Columns3,
   GripVertical,
   Hash,
@@ -212,6 +213,13 @@ export function SchemaSidebar() {
     setSelectedTableId(null);
   };
 
+  // Expand every table currently visible in the sidebar (after the search
+  // filter). Driven from the same toolbar button as collapse — the icon
+  // flips based on whether at least one table is currently open.
+  const expandAll = (ids: string[]) => {
+    setExpandedTables(new Set(ids));
+  };
+
   const beginRename = (tableId: string, currentName: string) => {
     setRenamingTableId(tableId);
     setRenameDraft(currentName);
@@ -271,17 +279,35 @@ export function SchemaSidebar() {
           <span className="rounded bg-foreground/5 px-1.5 py-px text-[9px] font-medium text-muted-foreground">
             {schema.tables.length}
           </span>
-          {schema.tables.length > 0 && (
-            <Tip label="Collapse all">
-              <button
-                type="button"
-                onClick={collapseAll}
-                className="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
-              >
-                <ChevronsDownUp className="size-3" />
-              </button>
-            </Tip>
-          )}
+          {schema.tables.length > 0 && (() => {
+            // Toggle: when at least one visible table is expanded, the
+            // button collapses everything; when all are collapsed, it
+            // expands every table currently passing the search filter.
+            const visibleIds = filteredTables.map((t) => t.id);
+            const anyExpanded = visibleIds.some((id) =>
+              expandedTables.has(id)
+            );
+            return (
+              <Tip label={anyExpanded ? "Collapse all tables" : "Expand all tables"}>
+                <button
+                  type="button"
+                  onClick={() =>
+                    anyExpanded ? collapseAll() : expandAll(visibleIds)
+                  }
+                  aria-label={
+                    anyExpanded ? "Collapse all tables" : "Expand all tables"
+                  }
+                  className="ml-auto inline-flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  {anyExpanded ? (
+                    <ChevronsDownUp className="size-3" />
+                  ) : (
+                    <ChevronsUpDown className="size-3" />
+                  )}
+                </button>
+              </Tip>
+            );
+          })()}
         </div>
 
         <div className="py-1">
@@ -389,6 +415,7 @@ export function SchemaSidebar() {
                     onDrop={handleRowDrop}
                     onDragEnd={() => setTableDragOverId(null)}
                     title="Drag to canvas to reposition · drag onto another row to reorder"
+                    aria-label={`Table ${table.name} — drag to canvas or onto another row to reorder`}
                   >
                     {tableDropIndicator && (
                       <span
@@ -844,6 +871,9 @@ function ColumnRow({
   return (
     <div
       role="button"
+      aria-label={`Column ${col.name}${
+        isPk ? " (primary key)" : isFk ? " (foreign key)" : ""
+      } — drag to reorder`}
       tabIndex={0}
       draggable
       onDragStart={(e) => {
@@ -925,7 +955,11 @@ function ColumnRow({
           )}
         />
       )}
-      <GripVertical className="size-3 shrink-0 cursor-grab text-muted-foreground/30 opacity-0 transition-opacity group-hover/col:opacity-100 active:cursor-grabbing" />
+      <GripVertical
+        className="size-3 shrink-0 cursor-grab text-muted-foreground/30 opacity-0 transition-opacity group-hover/col:opacity-100 active:cursor-grabbing"
+        aria-label={`Drag column ${col.name}`}
+        role="img"
+      />
       <TypeIcon className={cn("size-3 shrink-0", typeColor)} />
       <span
         className={cn(

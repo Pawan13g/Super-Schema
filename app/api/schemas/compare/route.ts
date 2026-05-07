@@ -10,7 +10,9 @@ import { requireJsonContentType } from "@/lib/csrf";
 const bodySchema = z.object({
   leftId: z.string().min(1),
   rightId: z.string().min(1),
-  dialect: z.enum(["postgresql", "mysql", "sqlite", "mssql"]).optional(),
+  dialect: z
+    .enum(["postgresql", "mysql", "sqlite", "mssql", "oracle"])
+    .optional(),
 });
 
 export async function POST(request: NextRequest) {

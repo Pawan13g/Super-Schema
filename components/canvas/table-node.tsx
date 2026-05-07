@@ -4,7 +4,6 @@ import { memo, useEffect, useRef, useState, type ReactElement } from "react";
 import { Handle, Position, type NodeProps } from "@xyflow/react";
 import {
   Table2,
-  X,
   Pencil,
   Check,
   KeyRound,
@@ -15,6 +14,7 @@ import {
   MessageSquare,
   MessageSquarePlus,
   Settings,
+  Trash,
 } from "lucide-react";
 import type { Table } from "@/lib/types";
 import { CommentPopover } from "./comment-popover";
@@ -237,7 +237,7 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
               }}
               className="rounded p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             >
-              <X className="size-3" />
+              <Trash className="size-3" />
             </button>
           </Tip>
         </div>

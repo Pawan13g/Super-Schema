@@ -991,13 +991,24 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
 
   const replaceSchema = useCallback(
     (next: Schema) => {
-      setSchema({
+      // A wholesale schema swap (tab switch, import, AI generation) is a
+      // hard boundary in undo history. The previous canvas state belongs
+      // to a different schema id; keeping it in the past stack means
+      // pressing Ctrl+Z silently morphs the current schema into another
+      // schema's tables — confusing and easy to miss. We clear both
+      // past and future stacks here so each loaded schema starts with a
+      // fresh history. We use the lower-level setSchemaRaw + manual
+      // history reset so the swap itself isn't pushed as an undo step.
+      historyRef.current.past = [];
+      historyRef.current.future = [];
+      syncHistoryFlags();
+      setSchemaRaw({
         tables: next.tables.map((table) => normalizeTable(table)),
         relations: next.relations,
       });
       setSelectedTableId(null);
     },
-    [setSchema]
+    [syncHistoryFlags]
   );
 
   return (

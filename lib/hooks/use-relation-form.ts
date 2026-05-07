@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
+import { toast } from "sonner";
 import { useSchema } from "@/lib/schema-store";
 
 const relationFormSchema = z.object({
@@ -23,10 +24,14 @@ export function useRelationForm(
 
   const sourceTableObj =
     schema.tables.find((t) => t.id === defaultSourceTable) || schema.tables[0];
-  const initialSourceCol =
-    sourceTableObj?.columns.find(
-      (c) => !c.constraints.includes("PRIMARY KEY")
-    ) || sourceTableObj?.columns[0];
+  // Default source column to the first NON-PK column. If the table only
+  // has PK columns, leave the field empty rather than falling back to a
+  // PK — picking the PK as the FK source produces a circular self-FK and
+  // is almost never what the user wants. The submit handler also rejects
+  // PK-only sources with a toast so the user gets a clear reason.
+  const initialSourceCol = sourceTableObj?.columns.find(
+    (c) => !c.constraints.includes("PRIMARY KEY")
+  );
 
   const form = useForm<RelationFormValues>({
     resolver: zodResolver(relationFormSchema),
@@ -57,6 +62,16 @@ export function useRelationForm(
 
       if (!sourceTableData || !targetTableData || !sourceCol || !targetCol)
         return;
+
+      // Reject PK → anything FKs. The source column of a FK should be a
+      // non-PK column on the child table; picking the PK creates the
+      // table's-own-id-as-FK case, which is a no-op or worse a self-loop.
+      if (sourceCol.constraints.includes("PRIMARY KEY")) {
+        toast.error(
+          `"${sourceCol.name}" is the primary key of ${sourceTableData.name}. Pick a non-PK column as the FK source, or add one first.`
+        );
+        return;
+      }
 
       if (values.type === "many-to-many") {
         createJunctionTable(

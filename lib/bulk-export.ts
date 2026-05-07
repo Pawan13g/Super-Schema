@@ -35,6 +35,7 @@ export async function bulkExport(
   entries.push({ name: `${dir}${base}.mysql.sql`, data: generateSql(schema, "mysql") });
   entries.push({ name: `${dir}${base}.sqlite.sql`, data: generateSql(schema, "sqlite") });
   entries.push({ name: `${dir}${base}.mssql.sql`, data: generateSql(schema, "mssql") });
+  entries.push({ name: `${dir}${base}.oracle.sql`, data: generateSql(schema, "oracle") });
   entries.push({
     name: `${dir}${base}.json`,
     data: JSON.stringify(schema, null, 2),

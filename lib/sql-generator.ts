@@ -1,6 +1,11 @@
 import type { Schema, Table, Column, Relation, ColumnType } from "./types";
 
-export type SqlDialect = "postgresql" | "mysql" | "sqlite" | "mssql";
+export type SqlDialect =
+  | "postgresql"
+  | "mysql"
+  | "sqlite"
+  | "mssql"
+  | "oracle";
 
 // Map our generic types to dialect-specific types
 const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
@@ -64,6 +69,35 @@ const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
     UUID: "TEXT",
     BLOB: "BLOB",
   },
+  // Oracle Database. Notes:
+  // - No native BOOLEAN until 23c — use NUMBER(1) and CHECK (col IN (0,1))
+  //   when needed. We emit NUMBER(1).
+  // - VARCHAR2 is the canonical varchar; TEXT is non-existent — use CLOB.
+  // - DATE in Oracle includes time-of-day; we map TIMESTAMP/DATETIME to
+  //   TIMESTAMP and TIME to a VARCHAR2(8) since there's no native TIME type.
+  // - JSON is native in 21c+; older Oracles use CLOB + ISJSON CHECK. We
+  //   emit JSON; if your Oracle version is older, switch the column to CLOB.
+  // - SERIAL → NUMBER GENERATED ALWAYS AS IDENTITY (Oracle 12c+).
+  oracle: {
+    INT: "NUMBER(10)",
+    BIGINT: "NUMBER(19)",
+    SMALLINT: "NUMBER(5)",
+    SERIAL: "NUMBER GENERATED ALWAYS AS IDENTITY",
+    FLOAT: "BINARY_FLOAT",
+    DOUBLE: "BINARY_DOUBLE",
+    DECIMAL: "NUMBER(18,2)",
+    BOOLEAN: "NUMBER(1)",
+    VARCHAR: "VARCHAR2(255)",
+    TEXT: "CLOB",
+    CHAR: "CHAR(1)",
+    DATE: "DATE",
+    TIMESTAMP: "TIMESTAMP",
+    DATETIME: "TIMESTAMP",
+    TIME: "VARCHAR2(8)",
+    JSON: "JSON",
+    UUID: "VARCHAR2(36)",
+    BLOB: "BLOB",
+  },
   // SQL Server (T-SQL). Notes:
   // - TIMESTAMP in T-SQL is rowversion, not date-time — use DATETIME2.
   // - JSON has no native type pre-2025; NVARCHAR(MAX) + ISJSON CHECK is idiomatic.
@@ -97,6 +131,9 @@ function mapType(type: ColumnType, dialect: SqlDialect): string {
 function quoteIdentifier(name: string, dialect: SqlDialect): string {
   if (dialect === "mysql") return `\`${name}\``;
   if (dialect === "mssql") return `[${name.replace(/]/g, "]]")}]`;
+  // Oracle: double-quoted identifiers preserve case (and only quoted ones do).
+  // We always quote so mixed-case names from the canvas survive a round trip
+  // through Oracle's default uppercase-folding.
   return `"${name}"`;
 }
 
@@ -136,6 +173,20 @@ function generateColumnDef(col: Column, dialect: SqlDialect): string {
     return parts.join(" ");
   }
 
+  // Oracle SERIAL → NUMBER GENERATED ALWAYS AS IDENTITY. The IDENTITY tag
+  // is already part of the mapped type; AUTO_INCREMENT constraint is implicit.
+  if (dialect === "oracle" && col.type === "SERIAL") {
+    parts.push(mappedType);
+    for (const c of col.constraints) {
+      if (c === "AUTO_INCREMENT") continue;
+      if (c === "PRIMARY KEY") parts.push("PRIMARY KEY");
+      if (c === "NOT NULL") parts.push("NOT NULL");
+      if (c === "UNIQUE") parts.push("UNIQUE");
+      if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
+    }
+    return parts.join(" ");
+  }
+
   // SQL Server SERIAL → INT IDENTITY(1,1). The IDENTITY tag is already part of
   // the mapped type; AUTO_INCREMENT constraint is implicit.
   if (dialect === "mssql" && col.type === "SERIAL") {
@@ -159,6 +210,7 @@ function generateColumnDef(col: Column, dialect: SqlDialect): string {
     if (c === "AUTO_INCREMENT") {
       if (dialect === "mysql") parts.push("AUTO_INCREMENT");
       else if (dialect === "mssql") parts.push("IDENTITY(1,1)");
+      else if (dialect === "oracle") parts.push("GENERATED ALWAYS AS IDENTITY");
       // PostgreSQL uses SERIAL type instead; SQLite handled above
     }
     if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
@@ -239,6 +291,12 @@ function resolveIndexMethod(
     // is out of scope for declarative DDL emit.
     return { syntaxKind: "regular", using: null };
   }
+  if (dialect === "oracle") {
+    // Oracle has B-tree, bitmap, function-based, etc. We emit plain B-tree
+    // for everything; specialized index types (bitmap, fulltext via Oracle
+    // Text) require setup beyond a single CREATE INDEX statement.
+    return { syntaxKind: "regular", using: null };
+  }
   // SQLite ignores method entirely.
   return { syntaxKind: "regular", using: null };
 }
@@ -299,7 +357,7 @@ function generateCommentStatements(table: Table, dialect: SqlDialect): string[] 
   if (table.comment?.trim()) {
     const tableComment = quoteStringLiteral(table.comment.trim());
 
-    if (dialect === "postgresql") {
+    if (dialect === "postgresql" || dialect === "oracle") {
       statements.push(`COMMENT ON TABLE ${q(table.name)} IS ${tableComment};`);
     } else if (dialect === "mysql") {
       statements.push(`ALTER TABLE ${q(table.name)} COMMENT = ${tableComment};`);
@@ -318,7 +376,7 @@ function generateCommentStatements(table: Table, dialect: SqlDialect): string[] 
     if (!col.comment?.trim()) continue;
     const columnComment = quoteStringLiteral(col.comment.trim());
 
-    if (dialect === "postgresql") {
+    if (dialect === "postgresql" || dialect === "oracle") {
       statements.push(`COMMENT ON COLUMN ${q(table.name)}.${q(col.name)} IS ${columnComment};`);
     } else if (dialect === "mssql") {
       statements.push(

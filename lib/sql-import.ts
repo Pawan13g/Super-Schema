@@ -10,9 +10,26 @@ import {
   type TableIndex,
 } from "./types";
 
-export type SqlImportDialect = "auto" | "postgresql" | "mysql" | "sqlite" | "mssql";
+export type SqlImportDialect =
+  | "auto"
+  | "postgresql"
+  | "mysql"
+  | "sqlite"
+  | "mssql"
+  | "oracle";
 
 const TYPE_RULES: Array<{ pattern: RegExp; type: ColumnType }> = [
+  // Oracle's NUMBER(p,s) lookup must come before generic INT/DOUBLE so a
+  // `NUMBER(10)` column doesn't get scooped up by the loose INT pattern
+  // when the importer sees the original Oracle DDL pre-preprocessing.
+  { pattern: /\bNUMBER\s*\(\s*\d+\s*,\s*\d+\s*\)/i, type: "DECIMAL" },
+  { pattern: /\bNUMBER\b/i, type: "DECIMAL" },
+  { pattern: /\bBINARY_DOUBLE\b/i, type: "DOUBLE" },
+  { pattern: /\bBINARY_FLOAT\b/i, type: "FLOAT" },
+  { pattern: /\bVARCHAR2\b/i, type: "VARCHAR" },
+  { pattern: /\bNVARCHAR2\b/i, type: "VARCHAR" },
+  { pattern: /\bCLOB\b/i, type: "TEXT" },
+  { pattern: /\bNCLOB\b/i, type: "TEXT" },
   { pattern: /\bBIGINT\b/i, type: "BIGINT" },
   { pattern: /\bSMALLINT\b/i, type: "SMALLINT" },
   { pattern: /\bTINYINT\b/i, type: "SMALLINT" },
@@ -109,6 +126,14 @@ function splitSqlStatements(sql: string): string[] {
   // semicolons inside a dollar-quoted body are NOT statement terminators —
   // PL/pgSQL function bodies depend on this.
   let dollarTag: string | null = null;
+  // MySQL DELIMITER state. mysqldump output for stored procedures emits:
+  //   DELIMITER //
+  //   CREATE PROCEDURE … BEGIN … END //
+  //   DELIMITER ;
+  // While `delimiter` differs from `;`, we must split on it instead of `;`
+  // so the procedure body (which contains plain semicolons) stays one
+  // statement. Stripped from the output entirely.
+  let delimiter = ";";
 
   for (let i = 0; i < sql.length; i += 1) {
     const char = sql[i];
@@ -167,6 +192,31 @@ function splitSqlStatements(sql: string): string[] {
           continue;
         }
       }
+      // MySQL `DELIMITER <token>` directive at start of a logical line.
+      // Switches the active terminator until the next DELIMITER appears.
+      // We don't preserve the directive itself in the output — it's not
+      // valid SQL anywhere downstream.
+      if ((char === "D" || char === "d") && (i === 0 || sql[i - 1] === "\n")) {
+        const m = sql.slice(i).match(/^DELIMITER[\t ]+(\S+)[ \t]*\r?\n?/i);
+        if (m) {
+          if (current.trim()) statements.push(current.trim());
+          current = "";
+          delimiter = m[1];
+          i += m[0].length - 1;
+          continue;
+        }
+      }
+      // Match the active multi-char delimiter.
+      if (
+        delimiter !== ";" &&
+        char === delimiter[0] &&
+        sql.startsWith(delimiter, i)
+      ) {
+        if (current.trim()) statements.push(current.trim());
+        current = "";
+        i += delimiter.length - 1;
+        continue;
+      }
     }
 
     if (char === "'" && !inDouble && !inBacktick) {
@@ -187,7 +237,13 @@ function splitSqlStatements(sql: string): string[] {
       continue;
     }
 
-    if (char === ";" && !inSingle && !inDouble && !inBacktick) {
+    if (
+      delimiter === ";" &&
+      char === ";" &&
+      !inSingle &&
+      !inDouble &&
+      !inBacktick
+    ) {
       if (current.trim()) statements.push(current.trim());
       current = "";
       continue;
@@ -240,40 +296,89 @@ function splitTopLevelCommas(s: string): string[] {
   return out;
 }
 
-function detectDialect(sql: string): "postgresql" | "mysql" | "sqlite" | "mssql" {
-  // SQL Server tells: bracketed identifiers, IDENTITY, NVARCHAR/NCHAR,
-  // UNIQUEIDENTIFIER, GO batch terminator, dbo. prefix, sp_addextendedproperty.
-  if (/\bIDENTITY\s*\(/i.test(sql)) return "mssql";
-  if (/\bUNIQUEIDENTIFIER\b/i.test(sql)) return "mssql";
-  if (/\bDATETIME2\b/i.test(sql)) return "mssql";
-  if (/\bDATETIMEOFFSET\b/i.test(sql)) return "mssql";
-  if (/\bN?VARCHAR\s*\(\s*MAX\s*\)/i.test(sql)) return "mssql";
-  if (/\bsp_addextendedproperty\b/i.test(sql)) return "mssql";
-  if (/^\s*GO\s*$/im.test(sql)) return "mssql";
-  if (/\[\s*[a-zA-Z_][\w]*\s*\]/.test(sql) && /\bdbo\.\b/i.test(sql)) return "mssql";
-  // Postgres tells (check before MySQL — backticks are MySQL-only but PG has
-  // many distinguishing markers that should win when present).
-  if (/\b(?:BIG|SMALL)?SERIAL\b/i.test(sql)) return "postgresql";
-  if (/::\s*\w/.test(sql)) return "postgresql";
-  if (/\bJSONB\b/i.test(sql)) return "postgresql";
-  if (/\bTIMESTAMPTZ\b/i.test(sql)) return "postgresql";
-  if (/\bBYTEA\b/i.test(sql)) return "postgresql";
-  if (/\bgen_random_uuid\s*\(/i.test(sql)) return "postgresql";
-  if (/\buuid_generate_v\d+\s*\(/i.test(sql)) return "postgresql";
-  if (/\bCREATE\s+EXTENSION\b/i.test(sql)) return "postgresql";
-  if (/\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\b/i.test(sql)) return "postgresql";
-  if (/\bPARTITION\s+BY\s+(?:HASH|RANGE|LIST)\s*\(/i.test(sql)) return "postgresql";
-  if (/\bPARTITION\s+OF\b/i.test(sql)) return "postgresql";
-  if (/\bTSVECTOR\b/i.test(sql)) return "postgresql";
-  if (/\bINET\b/i.test(sql)) return "postgresql";
-  if (/\bCITEXT\b/i.test(sql)) return "postgresql";
-  if (/\bRETURNS\s+TRIGGER\b/i.test(sql)) return "postgresql";
-  if (/\$\$/.test(sql)) return "postgresql";
-  // MySQL tells.
-  if (/`/.test(sql)) return "mysql";
-  if (/\bAUTO_INCREMENT\b/i.test(sql)) return "mysql";
-  if (/\bENGINE\s*=/i.test(sql)) return "mysql";
-  return "sqlite";
+// Score-based dialect detector. Each signal contributes a weighted vote;
+// the dialect with the highest score wins. Replaces the previous "first
+// match wins" cascade where a single PG-style word inside a MySQL dump
+// could mis-classify the whole file. Ties fall back to SQLite (the safest
+// generic parser).
+function detectDialect(
+  sql: string
+): "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle" {
+  type Dialect = "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle";
+  const scores: Record<Dialect, number> = {
+    postgresql: 0,
+    mysql: 0,
+    sqlite: 0,
+    mssql: 0,
+    oracle: 0,
+  };
+  const hit = (d: Dialect, w: number, re: RegExp) => {
+    if (re.test(sql)) scores[d] += w;
+  };
+
+  // SQL Server signals.
+  hit("mssql", 5, /\bIDENTITY\s*\(/i);
+  hit("mssql", 5, /\bUNIQUEIDENTIFIER\b/i);
+  hit("mssql", 4, /\bDATETIME2\b/i);
+  hit("mssql", 4, /\bDATETIMEOFFSET\b/i);
+  hit("mssql", 4, /\bN?VARCHAR\s*\(\s*MAX\s*\)/i);
+  hit("mssql", 5, /\bsp_addextendedproperty\b/i);
+  hit("mssql", 4, /^\s*GO\s*$/im);
+  hit("mssql", 3, /\bdbo\.\b/i);
+  if (/\[[a-zA-Z_]\w*\]/.test(sql) && /\bdbo\.\b/i.test(sql))
+    scores.mssql += 3;
+
+  // Postgres signals.
+  hit("postgresql", 5, /\b(?:BIG|SMALL)?SERIAL\b/i);
+  hit("postgresql", 4, /::\s*\w/);
+  hit("postgresql", 5, /\bJSONB\b/i);
+  hit("postgresql", 5, /\bTIMESTAMPTZ\b/i);
+  hit("postgresql", 5, /\bBYTEA\b/i);
+  hit("postgresql", 5, /\bgen_random_uuid\s*\(/i);
+  hit("postgresql", 5, /\buuid_generate_v\d+\s*\(/i);
+  hit("postgresql", 5, /\bCREATE\s+EXTENSION\b/i);
+  hit("postgresql", 4, /\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\b/i);
+  hit("postgresql", 5, /\bPARTITION\s+BY\s+(?:HASH|RANGE|LIST)\s*\(/i);
+  hit("postgresql", 5, /\bPARTITION\s+OF\b/i);
+  hit("postgresql", 4, /\bTSVECTOR\b/i);
+  hit("postgresql", 4, /\bINET\b/i);
+  hit("postgresql", 4, /\bCITEXT\b/i);
+  hit("postgresql", 5, /\bRETURNS\s+TRIGGER\b/i);
+  hit("postgresql", 5, /\$\$/);
+
+  // MySQL signals. Backticks alone are weak — many tools quote with them
+  // even on PG-derived dumps — but combined with other MySQL markers the
+  // total wins the score.
+  hit("mysql", 2, /`/);
+  hit("mysql", 5, /\bAUTO_INCREMENT\b/i);
+  hit("mysql", 5, /\bENGINE\s*=/i);
+  hit("mysql", 4, /\bDEFAULT\s+CHARSET\b/i);
+  hit("mysql", 4, /\bCOLLATE\s+\w+_\w+_ci\b/i);
+  hit("mysql", 5, /^\s*DELIMITER\b/im);
+  hit("mysql", 4, /\bUNSIGNED\b/i);
+
+  // Oracle signals.
+  hit("oracle", 5, /\bVARCHAR2\b/i);
+  hit("oracle", 5, /\bNVARCHAR2\b/i);
+  hit("oracle", 5, /\bN?CLOB\b/i);
+  hit("oracle", 5, /\bBINARY_(?:FLOAT|DOUBLE)\b/i);
+  hit("oracle", 4, /\bGENERATED\s+(?:ALWAYS|BY\s+DEFAULT)\s+AS\s+IDENTITY\b/i);
+  hit("oracle", 5, /\bCREATE\s+SEQUENCE\b/i);
+  hit("oracle", 4, /\bDUAL\b/i);
+  hit("oracle", 5, /\bSYSDATE\b/i);
+  hit("oracle", 4, /\bROWNUM\b/i);
+  hit("oracle", 4, /\bNUMBER\s*\(\s*\d+\s*(?:,\s*\d+\s*)?\)/i);
+
+  // Pick the max; ties → sqlite as the safest generic parser.
+  let best: Dialect = "sqlite";
+  let bestScore = 0;
+  (Object.keys(scores) as Dialect[]).forEach((d) => {
+    if (scores[d] > bestScore) {
+      best = d;
+      bestScore = scores[d];
+    }
+  });
+  return bestScore > 0 ? best : "sqlite";
 }
 
 // Recover from common copy-paste errors inside CREATE TABLE bodies. These
@@ -589,14 +694,71 @@ function preprocessMssql(sql: string): string {
   return r;
 }
 
+function preprocessOracle(sql: string): string {
+  let r = sql;
+  // Drop schema prefixes like SYS. / HR.
+  r = r.replace(/\b[A-Z][A-Z0-9_]*\s*\./g, (m) => {
+    // Conservative: only drop ALL-CAPS prefixes that look like schema
+    // names. Mixed-case "Public.Foo" we leave alone.
+    return /^[A-Z][A-Z0-9_]*\s*\.$/.test(m) ? "" : m;
+  });
+  // Oracle types → SQLite-friendly equivalents.
+  r = r.replace(/\bN?VARCHAR2\s*\(([^)]*)\)/gi, "VARCHAR($1)");
+  r = r.replace(/\bN?CLOB\b/gi, "TEXT");
+  r = r.replace(/\bBINARY_DOUBLE\b/gi, "DOUBLE");
+  r = r.replace(/\bBINARY_FLOAT\b/gi, "FLOAT");
+  r = r.replace(/\bRAW\s*\(\s*\d+\s*\)/gi, "BLOB");
+  r = r.replace(/\bLONG\s+RAW\b/gi, "BLOB");
+  r = r.replace(/\bBFILE\b/gi, "BLOB");
+  // NUMBER(p) / NUMBER(p,s) / bare NUMBER → INTEGER (sql.js accepts).
+  r = r.replace(/\bNUMBER\s*\(\s*\d+\s*,\s*0\s*\)/gi, "INTEGER");
+  r = r.replace(/\bNUMBER\s*\(\s*\d+\s*\)/gi, "INTEGER");
+  r = r.replace(/\bNUMBER\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)/gi, "DECIMAL($1,$2)");
+  r = r.replace(/\bNUMBER\b/gi, "DECIMAL");
+  // Oracle DATE includes time-of-day; treat as TIMESTAMP for canvas-shape
+  // purposes (we lose the distinction but avoid broken parses).
+  r = r.replace(/\bTIMESTAMP\s*\(\s*\d+\s*\)\s+WITH\s+(?:LOCAL\s+)?TIME\s+ZONE\b/gi, "TIMESTAMP");
+  r = r.replace(/\bTIMESTAMP\s+WITH\s+(?:LOCAL\s+)?TIME\s+ZONE\b/gi, "TIMESTAMP");
+  r = r.replace(/\bTIMESTAMP\s*\(\s*\d+\s*\)/gi, "TIMESTAMP");
+  // SERIAL-equivalents
+  r = r.replace(/\bGENERATED\s+(?:ALWAYS|BY\s+DEFAULT)(?:\s+ON\s+NULL)?\s+AS\s+IDENTITY(?:\s*\([^)]*\))?/gi, "");
+  // Defaults that sql.js can't evaluate
+  r = r.replace(/\bDEFAULT\s+SYS_GUID\s*\(\s*\)/gi, "");
+  r = r.replace(/\bDEFAULT\s+SYSDATE\b/gi, "DEFAULT CURRENT_TIMESTAMP");
+  r = r.replace(/\bDEFAULT\s+SYSTIMESTAMP\b/gi, "DEFAULT CURRENT_TIMESTAMP");
+  // Storage clauses + tablespace + segment options on CREATE TABLE.
+  r = r.replace(/\bSTORAGE\s*\([^)]*\)/gi, "");
+  r = r.replace(/\bTABLESPACE\s+[\w$]+/gi, "");
+  r = r.replace(/\bPCTFREE\s+\d+/gi, "");
+  r = r.replace(/\bPCTUSED\s+\d+/gi, "");
+  r = r.replace(/\bINITRANS\s+\d+/gi, "");
+  r = r.replace(/\bMAXTRANS\s+\d+/gi, "");
+  r = r.replace(/\bLOGGING\b/gi, "");
+  r = r.replace(/\bNOLOGGING\b/gi, "");
+  r = r.replace(/\bCOMPRESS(?:\s+\w+)?/gi, "");
+  r = r.replace(/\bNOCOMPRESS\b/gi, "");
+  r = r.replace(/\bCACHE\b/gi, "");
+  r = r.replace(/\bNOCACHE\b/gi, "");
+  r = r.replace(/\bENABLE\s+ROW\s+MOVEMENT\b/gi, "");
+  r = r.replace(/\bSEGMENT\s+CREATION\s+(?:DEFERRED|IMMEDIATE)/gi, "");
+  // ENABLE / DISABLE / VALIDATE on CHECK / FK constraints
+  r = r.replace(/\b(?:ENABLE|DISABLE|VALIDATE|NOVALIDATE)\b/gi, "");
+  // USING INDEX (...) clause on PK / UNIQUE
+  r = r.replace(/\bUSING\s+INDEX\s*\([^)]*\)/gi, "");
+  // Drop CREATE OR REPLACE EDITIONABLE prefix etc.
+  r = r.replace(/\bEDITIONABLE\b/gi, "");
+  return r;
+}
+
 function preprocessSql(
   sql: string,
-  dialect: "postgresql" | "mysql" | "sqlite" | "mssql"
+  dialect: "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle"
 ): string {
   let r = preprocessCommon(sql);
   if (dialect === "mysql") r = preprocessMysql(r);
   else if (dialect === "postgresql") r = preprocessPostgres(r);
   else if (dialect === "mssql") r = preprocessMssql(r);
+  else if (dialect === "oracle") r = preprocessOracle(r);
   return r;
 }
 
@@ -674,7 +836,7 @@ export interface ParseResult {
   warnings: ImportWarning[];
   // Dialect actually used (auto-detection may pick a different one than the
   // requested `dialect`).
-  dialect: "postgresql" | "mysql" | "sqlite" | "mssql";
+  dialect: "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle";
 }
 
 export async function parseSqlToSchema(
@@ -695,14 +857,27 @@ export async function parseSqlToSchemaDetailed(
   }
 
   const detected = detectDialect(trimmed);
-  const primary: "postgresql" | "mysql" | "sqlite" | "mssql" =
+  const primary: "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle" =
     dialect === "auto" ? detected : dialect;
 
   // Try the requested (or auto-detected) dialect first. If it yields no
   // tables, fall back through the remaining dialects so a misclick on the
   // dialect tab doesn't leave the user staring at an unhelpful error.
-  const candidates: ("postgresql" | "mysql" | "sqlite" | "mssql")[] = [primary];
-  for (const d of [detected, "postgresql", "mysql", "mssql", "sqlite"] as const) {
+  const candidates: (
+    | "postgresql"
+    | "mysql"
+    | "sqlite"
+    | "mssql"
+    | "oracle"
+  )[] = [primary];
+  for (const d of [
+    detected,
+    "postgresql",
+    "mysql",
+    "mssql",
+    "oracle",
+    "sqlite",
+  ] as const) {
     if (!candidates.includes(d)) candidates.push(d);
   }
 
@@ -720,7 +895,7 @@ export async function parseSqlToSchemaDetailed(
 
 async function parseInDialect(
   trimmed: string,
-  resolvedDialect: "postgresql" | "mysql" | "sqlite" | "mssql"
+  resolvedDialect: "postgresql" | "mysql" | "sqlite" | "mssql" | "oracle"
 ): Promise<{ schema: Schema; warnings: ImportWarning[] }> {
   const autoincMap = buildAutoincMap(trimmed);
   const cleaned = preprocessSql(trimmed, resolvedDialect);

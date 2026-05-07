@@ -13,7 +13,7 @@ import {
 const RATE_OPTS = { windowMs: 5 * 60_000, max: 10 };
 
 const bodySchema = z.object({
-  dialect: z.enum(["postgresql", "mysql", "mssql"]),
+  dialect: z.enum(["postgresql", "mysql", "mssql", "oracle"]),
   connectionString: z.string().min(1).max(2000),
 });
 

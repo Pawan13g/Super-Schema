@@ -7,6 +7,7 @@ import {
   clientKey,
   rateLimitResponse,
 } from "@/lib/rate-limit";
+import { logServerError, newRequestId } from "@/lib/api-log";
 
 // 5 sign-ups / hour / IP — kills bot floods without harming legitimate
 // signups. Honeypot field below catches naive scripted submitters earlier.
@@ -28,8 +29,19 @@ export async function POST(request: NextRequest) {
       "Too many sign-ups from this address. Try again later."
     );
 
+  const reqId = newRequestId();
+  let body: unknown;
   try {
-    const body = await request.json();
+    body = await request.json();
+  } catch {
+    // Distinct from "valid JSON, missing fields" (which is 400 below) so
+    // a misbehaving client gets actionable feedback.
+    return Response.json(
+      { error: "Invalid JSON body.", requestId: reqId },
+      { status: 400 }
+    );
+  }
+  try {
     const parsed = bodySchema.safeParse(body);
     if (!parsed.success) {
       return Response.json(
@@ -96,16 +108,26 @@ export async function POST(request: NextRequest) {
       raw.includes("ENOTFOUND") ||
       raw.includes("DATABASE_URL")
     ) {
-      console.error("Sign-up failed — database unreachable:", raw);
+      logServerError("sign-up", err, reqId, { kind: "db-unreachable" });
       return Response.json(
         {
           error:
             "Database is unreachable. Check DATABASE_URL on the server (must be a full postgresql:// URL). Restart the dev server / redeploy after fixing.",
+          requestId: reqId,
         },
         { status: 503 }
       );
     }
-    console.error("Sign-up failed:", raw);
-    return Response.json({ error: raw }, { status: 500 });
+    logServerError("sign-up", err, reqId);
+    // Don't echo the raw provider error to the client — it can include
+    // file paths / connection strings. Generic message + request id so
+    // support can correlate with the server log.
+    return Response.json(
+      {
+        error: "Sign-up failed. Please try again.",
+        requestId: reqId,
+      },
+      { status: 500 }
+    );
   }
 }

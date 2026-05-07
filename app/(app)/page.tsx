@@ -54,7 +54,6 @@ import {
   PanelLeft,
   FileText,
   Sparkles,
-  Minimize2,
 } from "lucide-react";
 import { usePanelRef } from "react-resizable-panels";
 import { exportCanvasPng } from "@/lib/export-utils";
@@ -77,10 +76,12 @@ function CanvasHeader({
   onToggleSidebar,
   sidebarCollapsed,
   onOpenProjects,
+  onNewSchema,
 }: {
   sidebarCollapsed: boolean;
   onToggleSidebar: () => void;
   onOpenProjects: () => void;
+  onNewSchema: () => void;
 }) {
   const { schemas, activeSchemaId } = useWorkspace();
   const schema = schemas.find((s) => s.id === activeSchemaId);
@@ -104,7 +105,10 @@ function CanvasHeader({
 
       <div className="hidden sm:contents">
         <WorkspaceSwitcher />
-        <ProjectSchemaNav onOpenProjects={onOpenProjects} />
+        <ProjectSchemaNav
+          onOpenProjects={onOpenProjects}
+          onNewSchema={onNewSchema}
+        />
       </div>
 
       <div className="ml-auto flex min-w-0 items-center gap-1 text-xs text-muted-foreground md:hidden">
@@ -244,7 +248,7 @@ export default function Home() {
     refreshProjects,
   } = useWorkspace();
   const { schema: canvasSchema } = useSchema();
-  const { mode: layoutMode, reset: resetLayout } = usePanelLayout();
+  const { mode: layoutMode } = usePanelLayout();
 
   const [newSchemaOpen, setNewSchemaOpen] = useState(false);
   const [newSchemaName, setNewSchemaName] = useState("");
@@ -501,6 +505,10 @@ export default function Home() {
                         onToggleSidebar={toggleSidebar}
                         sidebarCollapsed={sidebarCollapsed}
                         onOpenProjects={() => setProjectsOpen(true)}
+                        onNewSchema={() => {
+                          setNewSchemaName(`Schema ${schemas.length + 1}`);
+                          setNewSchemaOpen(true);
+                        }}
                       />
                       <TabBar />
                       <div className="min-h-0 flex-1">
@@ -540,17 +548,11 @@ export default function Home() {
           </ResizablePanel>
         </ResizablePanelGroup>
       ) : (
+        // Maximized single-panel layout. Each panel renders its own
+        // restore button in its header (Minimize2 toggle), so we don't
+        // float a second one on top of it — that produced the duplicate
+        // collapse-icon stack the user reported.
         <div className="relative min-h-0 flex-1">
-          <Tip label="Restore default layout">
-            <Button
-              variant="outline"
-              size="icon"
-              onClick={resetLayout}
-              className="absolute right-3 top-3 z-20 size-7 shadow-sm"
-            >
-              <Minimize2 className="size-3.5" />
-            </Button>
-          </Tip>
           {layoutMode === "sidebar" && <SchemaSidebar />}
           {layoutMode === "sql" && <SqlPreview />}
           {layoutMode === "ai" && (

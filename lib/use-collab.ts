@@ -134,8 +134,50 @@ export function useCollab(opts: UseCollabOptions): CollabState {
 
     setPeers(listPeers(session.provider));
 
+    // Stale-peer sweep. y-webrtc's awareness map can leak entries when a
+    // peer's WebRTC channel drops mid-handshake — the `disconnect` event
+    // never fires, so the avatar stays visible forever. Every 10 s we
+    // remove any client whose awareness entry hasn't been touched in
+    // 30 s. Local client (`clientID`) is exempt.
+    const STALE_MS = 30_000;
+    const sweep = () => {
+      const aw = session.provider.awareness;
+      const states = aw.getStates();
+      const meta = (aw as unknown as {
+        meta: Map<number, { clock: number; lastUpdated: number }>;
+      }).meta;
+      if (!meta) return;
+      const now = Date.now();
+      const stale: number[] = [];
+      states.forEach((_state, clientId) => {
+        if (clientId === aw.clientID) return;
+        const m = meta.get(clientId);
+        if (m && now - m.lastUpdated > STALE_MS) stale.push(clientId);
+      });
+      if (stale.length) {
+        // Internal API — typed loosely because Y.Awareness doesn't export
+        // a "remove peer" helper. `removeAwarenessStates` is the one yjs
+        // uses internally on disconnect.
+        const yProtocols =
+          (window as unknown as {
+            __removeAwarenessStates?: (
+              awareness: typeof aw,
+              clients: number[],
+              origin: unknown
+            ) => void;
+          }).__removeAwarenessStates ??
+          ((awInst, clients) => {
+            for (const id of clients) (awInst.getStates() as Map<number, unknown>).delete(id);
+          });
+        yProtocols(aw, stale, "stale-sweep");
+        setPeers(listPeers(session.provider));
+      }
+    };
+    const sweepTimer = setInterval(sweep, 10_000);
+
     return () => {
       if (seedTimer) clearTimeout(seedTimer);
+      clearInterval(sweepTimer);
       session.doc.off("update", onUpdate);
       session.provider.awareness.off("change", onAwareness);
       session.provider.off("peers", onPeers);

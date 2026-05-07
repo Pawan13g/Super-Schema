@@ -1,7 +1,12 @@
 import type { Schema, Column, Relation, ColumnType, ColumnConstraint } from "./types";
 import { diffSchemas, type SchemaDiff } from "./schema-diff";
 
-export type SqlDialect = "postgresql" | "mysql" | "sqlite" | "mssql";
+export type SqlDialect =
+  | "postgresql"
+  | "mysql"
+  | "sqlite"
+  | "mssql"
+  | "oracle";
 
 const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
   postgresql: {
@@ -64,6 +69,26 @@ const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
     UUID: "UNIQUEIDENTIFIER",
     BLOB: "VARBINARY(MAX)",
   },
+  oracle: {
+    INT: "NUMBER(10)",
+    BIGINT: "NUMBER(19)",
+    SMALLINT: "NUMBER(5)",
+    SERIAL: "NUMBER GENERATED ALWAYS AS IDENTITY",
+    FLOAT: "BINARY_FLOAT",
+    DOUBLE: "BINARY_DOUBLE",
+    DECIMAL: "NUMBER(18,2)",
+    BOOLEAN: "NUMBER(1)",
+    VARCHAR: "VARCHAR2(255)",
+    TEXT: "CLOB",
+    CHAR: "CHAR(1)",
+    DATE: "DATE",
+    TIMESTAMP: "TIMESTAMP",
+    DATETIME: "TIMESTAMP",
+    TIME: "VARCHAR2(8)",
+    JSON: "JSON",
+    UUID: "VARCHAR2(36)",
+    BLOB: "BLOB",
+  },
   sqlite: {
     INT: "INTEGER",
     BIGINT: "INTEGER",
@@ -93,6 +118,7 @@ function mapType(type: ColumnType, dialect: SqlDialect): string {
 function quoteIdent(name: string, dialect: SqlDialect): string {
   if (dialect === "mysql") return `\`${name}\``;
   if (dialect === "mssql") return `[${name.replace(/]/g, "]]")}]`;
+  // Oracle + PG + SQLite all use double quotes.
   return `"${name}"`;
 }
 
@@ -104,6 +130,7 @@ function inlineConstraints(col: Column, dialect: SqlDialect): string {
     else if (c === "UNIQUE") parts.push("UNIQUE");
     else if (c === "AUTO_INCREMENT" && dialect === "mysql") parts.push("AUTO_INCREMENT");
     else if (c === "AUTO_INCREMENT" && dialect === "mssql") parts.push("IDENTITY(1,1)");
+    else if (c === "AUTO_INCREMENT" && dialect === "oracle") parts.push("GENERATED ALWAYS AS IDENTITY");
     else if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
   }
   return parts.join(" ");
@@ -216,10 +243,12 @@ export function generateMigrationSql(
     const oldColsByName = new Map(oldT.columns.map((c) => [c.name, c]));
     const newColsByName = new Map(newT.columns.map((c) => [c.name, c]));
 
-    // Column adds — T-SQL uses ALTER TABLE … ADD col, no COLUMN keyword.
+    // Column adds — T-SQL and Oracle both use ALTER TABLE … ADD col,
+    // without the COLUMN keyword.
     for (const c of newT.columns) {
       if (!oldColsByName.has(c.name)) {
-        const addClause = dialect === "mssql" ? "ADD" : "ADD COLUMN";
+        const addClause =
+          dialect === "mssql" || dialect === "oracle" ? "ADD" : "ADD COLUMN";
         stmts.push(
           `ALTER TABLE ${q(newT.name)} ${addClause} ${columnDef(c, dialect)};`
         );
@@ -269,6 +298,14 @@ export function generateMigrationSql(
             : "";
           stmts.push(
             `ALTER TABLE ${q(newT.name)} ALTER COLUMN ${q(newCol.name)} ${mapped}${nullability};`
+          );
+        } else if (dialect === "oracle") {
+          // Oracle: ALTER TABLE … MODIFY (col TYPE [NOT NULL]).
+          const nullability = newCol.constraints.includes("NOT NULL")
+            ? " NOT NULL"
+            : "";
+          stmts.push(
+            `ALTER TABLE ${q(newT.name)} MODIFY (${q(newCol.name)} ${mapped}${nullability});`
           );
         } else {
           stmts.push(

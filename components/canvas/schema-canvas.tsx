@@ -27,7 +27,40 @@ import { useWorkspace } from "@/lib/workspace-context";
 import { useIsMobile } from "@/lib/use-media-query";
 import { isMod, isTypingTarget } from "@/lib/shortcuts";
 import { computeAutoLayout } from "@/lib/auto-layout";
-import type { Table } from "@/lib/types";
+import type { Table, ColumnType } from "@/lib/types";
+
+// Column type compatibility for FK creation. Two columns can join if they
+// fall in the same equivalence class (numeric / text / date / json / etc.).
+// Strict identity is too brittle (`INT` vs `BIGINT` is a fine FK) and
+// "anything goes" is a footgun. Returns true when the relationship is
+// semantically reasonable; the canvas blocks the drag otherwise.
+const TYPE_FAMILIES: Partial<Record<ColumnType, "numeric" | "text" | "date" | "uuid" | "blob" | "json" | "boolean">> = {
+  INT: "numeric",
+  BIGINT: "numeric",
+  SMALLINT: "numeric",
+  SERIAL: "numeric",
+  FLOAT: "numeric",
+  DOUBLE: "numeric",
+  DECIMAL: "numeric",
+  BOOLEAN: "boolean",
+  VARCHAR: "text",
+  TEXT: "text",
+  CHAR: "text",
+  DATE: "date",
+  TIMESTAMP: "date",
+  DATETIME: "date",
+  TIME: "date",
+  JSON: "json",
+  UUID: "uuid",
+  BLOB: "blob",
+};
+function areTypesCompatible(a: ColumnType, b: ColumnType): boolean {
+  if (a === b) return true;
+  const fa = TYPE_FAMILIES[a];
+  const fb = TYPE_FAMILIES[b];
+  if (!fa || !fb) return true; // unknown — don't block.
+  return fa === fb;
+}
 import { TableNode } from "./table-node";
 import {
   ContextMenu,
@@ -692,8 +725,19 @@ export function SchemaCanvas() {
       const sourceTable = schema.tables.find((t) => t.id === connection.source);
       const targetTable = schema.tables.find((t) => t.id === connection.target);
       if (!sourceTable || !targetTable) return;
-      if (!sourceTable.columns.some((c) => c.id === sourceCol)) return;
-      if (!targetTable.columns.some((c) => c.id === targetCol)) return;
+      const sCol = sourceTable.columns.find((c) => c.id === sourceCol);
+      const tCol = targetTable.columns.find((c) => c.id === targetCol);
+      if (!sCol || !tCol) return;
+      // Block + toast on type mismatch so the user sees why the drag
+      // didn't take. `isValidConnection` already prevents the visual drop,
+      // but onConnect is also reachable via programmatic / context-menu
+      // flows so we double-check here.
+      if (!areTypesCompatible(sCol.type, tCol.type)) {
+        toast.error(
+          `Can't connect ${sCol.type} → ${tCol.type}. FK columns must share a type family (numeric / text / date / …).`
+        );
+        return;
+      }
 
       setPendingConnection({
         sourceTableId: connection.source,
@@ -752,13 +796,31 @@ export function SchemaCanvas() {
     [pendingConnection, schema.tables, addRelation, updateColumn, createJunctionTable]
   );
 
-  // Prevent invalid connections (same node)
+  // Prevent invalid connections: same-node loops (already blocked) AND
+  // type-incompatible columns (a `text` FK pointing at an `int` PK is
+  // almost always a mistake — every dialect rejects the FK at runtime
+  // anyway). React Flow calls this on every hover during a drag so the
+  // body has to stay cheap; we resolve the source/target tables + columns
+  // by id and compare via a small compatibility map.
   const isValidConnection = useCallback(
     (conn: Connection | Edge) => {
       if (!conn.source || !conn.target) return false;
-      return conn.source !== conn.target;
+      if (conn.source === conn.target) return false;
+      const stripSuffix = (h: string | null | undefined) =>
+        (h ?? "")
+          .replace(/-(source|target)(-(left|right|top|bottom))?$/, "")
+          .trim();
+      const sCol = stripSuffix(conn.sourceHandle);
+      const tCol = stripSuffix(conn.targetHandle);
+      if (!sCol || !tCol) return true; // RF passes node-level conn during preview — allow.
+      const srcTable = schema.tables.find((t) => t.id === conn.source);
+      const tgtTable = schema.tables.find((t) => t.id === conn.target);
+      const srcCol = srcTable?.columns.find((c) => c.id === sCol);
+      const tgtCol = tgtTable?.columns.find((c) => c.id === tCol);
+      if (!srcCol || !tgtCol) return false;
+      return areTypesCompatible(srcCol.type, tgtCol.type);
     },
-    []
+    [schema.tables]
   );
 
   const onPaneClick = useCallback(() => {
@@ -1093,7 +1155,7 @@ export function SchemaCanvas() {
           className="!rounded-lg !border !border-border !bg-card !shadow-sm"
         >
           <Tip label="Zoom in (=)" side="right">
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={() =>
                   reactFlowInstanceRef.current?.zoomIn({ duration: 200 })
@@ -1105,7 +1167,7 @@ export function SchemaCanvas() {
             </span>
           </Tip>
           <Tip label="Zoom out (-)" side="right">
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={() =>
                   reactFlowInstanceRef.current?.zoomOut({ duration: 200 })
@@ -1117,7 +1179,7 @@ export function SchemaCanvas() {
             </span>
           </Tip>
           <Tip label="Fit view (F)" side="right">
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={() =>
                   reactFlowInstanceRef.current?.fitView({
@@ -1132,7 +1194,7 @@ export function SchemaCanvas() {
             </span>
           </Tip>
           <Tip label={interactive ? "Lock canvas" : "Unlock canvas"} side="right">
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={() => setInteractive((v) => !v)}
                 aria-label={interactive ? "Lock canvas" : "Unlock canvas"}
@@ -1145,7 +1207,7 @@ export function SchemaCanvas() {
             label={canUndo ? "Undo (Ctrl+Z)" : "Nothing to undo"}
             side="right"
           >
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={undo}
                 aria-label="Undo"
@@ -1159,7 +1221,7 @@ export function SchemaCanvas() {
             label={canRedo ? "Redo (Ctrl+Shift+Z)" : "Nothing to redo"}
             side="right"
           >
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={redo}
                 aria-label="Redo"
@@ -1177,7 +1239,7 @@ export function SchemaCanvas() {
             }
             side="right"
           >
-            <span className="contents">
+            <span className="inline-flex">
               <ControlButton
                 onClick={autoArrange}
                 aria-label="Auto-arrange tables"

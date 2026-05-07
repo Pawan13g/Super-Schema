@@ -31,7 +31,11 @@ type SqlTab = (typeof VALID_TABS)[number];
 const isSqlTab = (v: unknown): v is SqlTab =>
   typeof v === "string" && (VALID_TABS as readonly string[]).includes(v);
 const isDialect = (v: unknown): v is SqlDialect =>
-  v === "postgresql" || v === "mysql" || v === "sqlite" || v === "mssql";
+  v === "postgresql" ||
+  v === "mysql" ||
+  v === "sqlite" ||
+  v === "mssql" ||
+  v === "oracle";
 const isModelTarget = (v: unknown): v is ModelTarget =>
   v === "prisma" ||
   v === "sequelize" ||
@@ -256,6 +260,9 @@ export function SqlPreview() {
                   <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
                     SQL Server
                   </TabsTrigger>
+                  <TabsTrigger value="oracle" className="text-[10px] px-2 h-5">
+                    Oracle
+                  </TabsTrigger>
                 </TabsList>
               </Tabs>
 
@@ -438,6 +445,9 @@ export function SqlPreview() {
                 </TabsTrigger>
                 <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
                   MSSQL
+                </TabsTrigger>
+                <TabsTrigger value="oracle" className="text-[10px] px-2 h-5">
+                  Oracle
                 </TabsTrigger>
               </TabsList>
             </Tabs>
