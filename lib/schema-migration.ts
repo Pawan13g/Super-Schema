@@ -1,7 +1,7 @@
 import type { Schema, Column, Relation, ColumnType, ColumnConstraint } from "./types";
 import { diffSchemas, type SchemaDiff } from "./schema-diff";
 
-export type SqlDialect = "postgresql" | "mysql" | "sqlite";
+export type SqlDialect = "postgresql" | "mysql" | "sqlite" | "mssql";
 
 const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
   postgresql: {
@@ -44,6 +44,26 @@ const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
     UUID: "CHAR(36)",
     BLOB: "BLOB",
   },
+  mssql: {
+    INT: "INT",
+    BIGINT: "BIGINT",
+    SMALLINT: "SMALLINT",
+    SERIAL: "INT IDENTITY(1,1)",
+    FLOAT: "REAL",
+    DOUBLE: "FLOAT",
+    DECIMAL: "DECIMAL(18,2)",
+    BOOLEAN: "BIT",
+    VARCHAR: "NVARCHAR(255)",
+    TEXT: "NVARCHAR(MAX)",
+    CHAR: "NCHAR(1)",
+    DATE: "DATE",
+    TIMESTAMP: "DATETIME2",
+    DATETIME: "DATETIME2",
+    TIME: "TIME",
+    JSON: "NVARCHAR(MAX)",
+    UUID: "UNIQUEIDENTIFIER",
+    BLOB: "VARBINARY(MAX)",
+  },
   sqlite: {
     INT: "INTEGER",
     BIGINT: "INTEGER",
@@ -72,6 +92,7 @@ function mapType(type: ColumnType, dialect: SqlDialect): string {
 
 function quoteIdent(name: string, dialect: SqlDialect): string {
   if (dialect === "mysql") return `\`${name}\``;
+  if (dialect === "mssql") return `[${name.replace(/]/g, "]]")}]`;
   return `"${name}"`;
 }
 
@@ -82,6 +103,7 @@ function inlineConstraints(col: Column, dialect: SqlDialect): string {
     else if (c === "NOT NULL") parts.push("NOT NULL");
     else if (c === "UNIQUE") parts.push("UNIQUE");
     else if (c === "AUTO_INCREMENT" && dialect === "mysql") parts.push("AUTO_INCREMENT");
+    else if (c === "AUTO_INCREMENT" && dialect === "mssql") parts.push("IDENTITY(1,1)");
     else if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
   }
   return parts.join(" ");
@@ -194,11 +216,12 @@ export function generateMigrationSql(
     const oldColsByName = new Map(oldT.columns.map((c) => [c.name, c]));
     const newColsByName = new Map(newT.columns.map((c) => [c.name, c]));
 
-    // Column adds
+    // Column adds — T-SQL uses ALTER TABLE … ADD col, no COLUMN keyword.
     for (const c of newT.columns) {
       if (!oldColsByName.has(c.name)) {
+        const addClause = dialect === "mssql" ? "ADD" : "ADD COLUMN";
         stmts.push(
-          `ALTER TABLE ${q(newT.name)} ADD COLUMN ${columnDef(c, dialect)};`
+          `ALTER TABLE ${q(newT.name)} ${addClause} ${columnDef(c, dialect)};`
         );
         if (c.constraints.includes("NOT NULL") && !c.defaultValue) {
           warnings.push(
@@ -239,6 +262,14 @@ export function generateMigrationSql(
           stmts.push(
             `ALTER TABLE ${q(newT.name)} MODIFY COLUMN ${columnDef(newCol, dialect)};`
           );
+        } else if (dialect === "mssql") {
+          // T-SQL: ALTER COLUMN <name> <type> [NULL|NOT NULL]
+          const nullability = newCol.constraints.includes("NOT NULL")
+            ? " NOT NULL"
+            : "";
+          stmts.push(
+            `ALTER TABLE ${q(newT.name)} ALTER COLUMN ${q(newCol.name)} ${mapped}${nullability};`
+          );
         } else {
           stmts.push(
             `-- SQLite cannot ALTER COLUMN type for "${newT.name}.${newCol.name}". Manual table rebuild required.`
@@ -261,6 +292,14 @@ export function generateMigrationSql(
           // MySQL nullability change requires MODIFY COLUMN with full def
           stmts.push(
             `ALTER TABLE ${q(newT.name)} MODIFY COLUMN ${columnDef(newCol, dialect)};`
+          );
+        } else if (dialect === "mssql" && !typeChanged) {
+          // T-SQL: ALTER COLUMN <name> <type> [NULL|NOT NULL] — type required.
+          const mapped = mapType(newCol.type, dialect);
+          const nn =
+            cChanges.nullability === "set-not-null" ? "NOT NULL" : "NULL";
+          stmts.push(
+            `ALTER TABLE ${q(newT.name)} ALTER COLUMN ${q(newCol.name)} ${mapped} ${nn};`
           );
         }
         if (cChanges.nullability === "set-not-null") {
@@ -286,6 +325,20 @@ export function generateMigrationSql(
           stmts.push(
             `ALTER TABLE ${q(newT.name)} MODIFY COLUMN ${columnDef(newCol, dialect)};`
           );
+        } else if (dialect === "mssql") {
+          // T-SQL DEFAULTs are named constraints. Drop existing then re-add.
+          const cn = `df_${newT.name}_${newCol.name}`;
+          stmts.push(
+            `-- DEFAULT change on "${newT.name}.${newCol.name}" — drop existing default constraint first if present.`
+          );
+          stmts.push(
+            `ALTER TABLE ${q(newT.name)} DROP CONSTRAINT IF EXISTS ${q(cn)};`
+          );
+          if (newCol.defaultValue) {
+            stmts.push(
+              `ALTER TABLE ${q(newT.name)} ADD CONSTRAINT ${q(cn)} DEFAULT ${newCol.defaultValue} FOR ${q(newCol.name)};`
+            );
+          }
         }
       }
 
@@ -378,6 +431,10 @@ export function generateMigrationSql(
     } else if (dialect === "sqlite") {
       stmts.push(
         `-- SQLite cannot drop FK on "${fk.table}" via ALTER. Manual table rebuild required.`
+      );
+    } else if (dialect === "mssql") {
+      stmts.push(
+        `ALTER TABLE ${q(fk.table)} DROP CONSTRAINT ${q(fk.constraintName)};`
       );
     } else {
       stmts.push(

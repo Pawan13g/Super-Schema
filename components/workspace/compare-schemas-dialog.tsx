@@ -255,6 +255,9 @@ export function CompareSchemasDialog({
               <TabsTrigger value="sqlite" className="h-5 px-2 text-[10px]">
                 SQLite
               </TabsTrigger>
+              <TabsTrigger value="mssql" className="h-5 px-2 text-[10px]">
+                SQL Server
+              </TabsTrigger>
             </TabsList>
           </Tabs>
         </div>

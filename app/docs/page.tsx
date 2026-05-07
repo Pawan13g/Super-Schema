@@ -157,7 +157,7 @@ const QUICKSTART_CARDS = [
 const TOPIC_CARDS = [
   { id: "canvas", title: "Visual canvas", icon: Compass, blurb: "Drag-and-drop tables, relations, and indexes." },
   { id: "ai-providers", title: "AI providers", icon: Sparkles, blurb: "Seven supported providers, all BYOK." },
-  { id: "sql", title: "SQL dialects", icon: Database, blurb: "PostgreSQL, MySQL, SQLite output." },
+  { id: "sql", title: "SQL dialects", icon: Database, blurb: "PostgreSQL, MySQL, SQLite, SQL Server output." },
   { id: "models", title: "ORM models", icon: Boxes, blurb: "Prisma + Sequelize codegen." },
   { id: "import-export", title: "Import / export", icon: Download, blurb: "Paste DDL or upload .sql to rebuild the canvas." },
   { id: "linter", title: "Schema linter", icon: Fingerprint, blurb: "Real-time issues for missing PKs, FKs, naming." },
@@ -550,7 +550,7 @@ export default function DocsPage() {
             <Section id="migration" eyebrow="Workflow" title="Migration SQL generator" icon={Database}>
               <p className="text-sm leading-relaxed">
                 The compare dialog&apos;s second tab outputs migration SQL for
-                PostgreSQL, MySQL, or SQLite.
+                PostgreSQL, MySQL, SQLite, or SQL Server.
               </p>
               <ul className="mt-2 list-disc space-y-1 pl-5 text-sm">
                 <li><code>CREATE TABLE</code> for added tables (with FK constraints inline).</li>
@@ -732,7 +732,7 @@ export default function DocsPage() {
             <Section id="import-export" eyebrow="Round-trip" title="Import & export" icon={Download}>
               <h3 className="mt-0 text-base font-semibold">Import</h3>
               <p className="text-sm">
-                Paste DDL or upload a <code>.sql</code> file in the SQL Import tab. Auto-detects PostgreSQL, MySQL, or SQLite, or specify the dialect explicitly. Files up to 5 MB.
+                Paste DDL or upload a <code>.sql</code> file in the SQL Import tab. Auto-detects PostgreSQL, MySQL, SQLite, or SQL Server, or specify the dialect explicitly. Files up to 5 MB.
               </p>
               <h3 className="mt-4 text-base font-semibold">Export</h3>
               <ul className="mt-1 list-disc space-y-1 pl-5 text-sm">

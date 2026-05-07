@@ -10,29 +10,39 @@ import {
   type TableIndex,
 } from "./types";
 
-export type SqlImportDialect = "auto" | "postgresql" | "mysql" | "sqlite";
+export type SqlImportDialect = "auto" | "postgresql" | "mysql" | "sqlite" | "mssql";
 
 const TYPE_RULES: Array<{ pattern: RegExp; type: ColumnType }> = [
   { pattern: /\bBIGINT\b/i, type: "BIGINT" },
   { pattern: /\bSMALLINT\b/i, type: "SMALLINT" },
+  { pattern: /\bTINYINT\b/i, type: "SMALLINT" },
   { pattern: /\bINT\b/i, type: "INT" },
   { pattern: /\bDOUBLE\b/i, type: "DOUBLE" },
   { pattern: /\bREAL\b/i, type: "DOUBLE" },
   { pattern: /\bFLOAT\b/i, type: "FLOAT" },
   { pattern: /\bDECIMAL\b/i, type: "DECIMAL" },
   { pattern: /\bNUMERIC\b/i, type: "DECIMAL" },
+  { pattern: /\bMONEY\b/i, type: "DECIMAL" },
+  { pattern: /\bBIT\b/i, type: "BOOLEAN" },
   { pattern: /\bBOOLEAN\b/i, type: "BOOLEAN" },
   { pattern: /\bBOOL\b/i, type: "BOOLEAN" },
-  { pattern: /\bVARCHAR\b/i, type: "VARCHAR" },
+  { pattern: /\bN?VARCHAR\b/i, type: "VARCHAR" },
   { pattern: /\bCHARACTER VARYING\b/i, type: "VARCHAR" },
-  { pattern: /\bCHAR\b/i, type: "CHAR" },
-  { pattern: /\bTEXT\b/i, type: "TEXT" },
+  { pattern: /\bN?CHAR\b/i, type: "CHAR" },
+  { pattern: /\bN?TEXT\b/i, type: "TEXT" },
+  { pattern: /\bDATETIME2\b/i, type: "DATETIME" },
+  { pattern: /\bDATETIMEOFFSET\b/i, type: "DATETIME" },
+  { pattern: /\bSMALLDATETIME\b/i, type: "DATETIME" },
   { pattern: /\bTIMESTAMP\b/i, type: "TIMESTAMP" },
   { pattern: /\bDATETIME\b/i, type: "DATETIME" },
   { pattern: /\bDATE\b/i, type: "DATE" },
   { pattern: /\bTIME\b/i, type: "TIME" },
   { pattern: /\bJSON\b/i, type: "JSON" },
   { pattern: /\bUUID\b/i, type: "UUID" },
+  { pattern: /\bUNIQUEIDENTIFIER\b/i, type: "UUID" },
+  { pattern: /\bVARBINARY\b/i, type: "BLOB" },
+  { pattern: /\bIMAGE\b/i, type: "BLOB" },
+  { pattern: /\bROWVERSION\b/i, type: "BLOB" },
   { pattern: /\bBLOB\b/i, type: "BLOB" },
 ];
 
@@ -172,7 +182,17 @@ function splitTopLevelCommas(s: string): string[] {
   return out;
 }
 
-function detectDialect(sql: string): "postgresql" | "mysql" | "sqlite" {
+function detectDialect(sql: string): "postgresql" | "mysql" | "sqlite" | "mssql" {
+  // SQL Server tells: bracketed identifiers, IDENTITY, NVARCHAR/NCHAR,
+  // UNIQUEIDENTIFIER, GO batch terminator, dbo. prefix, sp_addextendedproperty.
+  if (/\bIDENTITY\s*\(/i.test(sql)) return "mssql";
+  if (/\bUNIQUEIDENTIFIER\b/i.test(sql)) return "mssql";
+  if (/\bDATETIME2\b/i.test(sql)) return "mssql";
+  if (/\bDATETIMEOFFSET\b/i.test(sql)) return "mssql";
+  if (/\bN?VARCHAR\s*\(\s*MAX\s*\)/i.test(sql)) return "mssql";
+  if (/\bsp_addextendedproperty\b/i.test(sql)) return "mssql";
+  if (/^\s*GO\s*$/im.test(sql)) return "mssql";
+  if (/\[\s*[a-zA-Z_][\w]*\s*\]/.test(sql) && /\bdbo\.\b/i.test(sql)) return "mssql";
   if (/`/.test(sql)) return "mysql";
   if (/\bAUTO_INCREMENT\b/i.test(sql)) return "mysql";
   if (/\bENGINE\s*=/i.test(sql)) return "mysql";
@@ -267,13 +287,67 @@ function preprocessPostgres(sql: string): string {
   return r;
 }
 
+function preprocessMssql(sql: string): string {
+  let r = sql;
+  // Strip GO batch terminators on their own lines.
+  r = r.replace(/^\s*GO\s*;?\s*$/gim, "");
+  // sp_addextendedproperty / sp_rename / EXEC … -> drop entire statement.
+  r = r.replace(/EXEC(?:UTE)?\s+sp_\w+[^;]*;?/gi, "");
+  // USE [db]; / SET XACT_ABORT … / SET QUOTED_IDENTIFIER … — covered by
+  // preprocessCommon's SET strip; also drop USE.
+  r = r.replace(/^\s*USE\s+[^;]+;?/gim, "");
+  // CREATE SCHEMA [name] AUTHORIZATION …
+  r = r.replace(/CREATE\s+SCHEMA\s+[^;]+;?/gi, "");
+  // dbo. / [dbo]. schema prefix
+  r = r.replace(/\b(?:\[\s*dbo\s*\]|dbo)\s*\./gi, "");
+  // Convert [ident] -> "ident" for sql.js
+  r = r.replace(/\[([^\]]+)\]/g, (_m, name: string) => `"${name.replace(/"/g, '""')}"`);
+  // T-SQL types -> SQLite-friendly
+  r = r.replace(/\bN(VARCHAR|CHAR|TEXT)\b/gi, "$1");
+  r = r.replace(/\bVARCHAR\s*\(\s*MAX\s*\)/gi, "TEXT");
+  r = r.replace(/\bVARBINARY\s*\(\s*MAX\s*\)/gi, "BLOB");
+  r = r.replace(/\bVARBINARY\b/gi, "BLOB");
+  r = r.replace(/\bIMAGE\b/gi, "BLOB");
+  r = r.replace(/\bROWVERSION\b/gi, "BLOB");
+  r = r.replace(/\bUNIQUEIDENTIFIER\b/gi, "TEXT");
+  r = r.replace(/\bDATETIME2\s*(?:\(\s*\d+\s*\))?/gi, "TIMESTAMP");
+  r = r.replace(/\bDATETIMEOFFSET\s*(?:\(\s*\d+\s*\))?/gi, "TIMESTAMP");
+  r = r.replace(/\bSMALLDATETIME\b/gi, "TIMESTAMP");
+  r = r.replace(/\bMONEY\b/gi, "DECIMAL");
+  r = r.replace(/\bSMALLMONEY\b/gi, "DECIMAL");
+  r = r.replace(/\bBIT\b/gi, "INTEGER");
+  // IDENTITY(seed, incr) — drop; autoinc detected from original SQL.
+  r = r.replace(/\bIDENTITY\s*(?:\(\s*\d+\s*,\s*\d+\s*\))?/gi, "");
+  // Trailing storage clauses on CREATE TABLE / INDEX:
+  // ON [PRIMARY], TEXTIMAGE_ON, FILESTREAM_ON, WITH (...) (index/table options)
+  r = r.replace(/\bON\s+(?:\[\s*\w+\s*\]|"\w+"|\w+)\s*(?:\(\s*\w+\s*\))?/gi, "");
+  r = r.replace(/\bTEXTIMAGE_ON\s+(?:\[\s*\w+\s*\]|"\w+"|\w+)/gi, "");
+  r = r.replace(/\bFILESTREAM_ON\s+(?:\[\s*\w+\s*\]|"\w+"|\w+)/gi, "");
+  r = r.replace(/\bWITH\s*\([^)]*\)/gi, "");
+  // CONSTRAINT name DEFAULT (val) FOR col — flatten to DEFAULT val (sql.js
+  // accepts inline DEFAULT expressions in column defs only; this surfaces in
+  // ALTER TABLE … ADD DEFAULT which we ignore at parse time).
+  r = r.replace(/\bGETDATE\s*\(\s*\)/gi, "CURRENT_TIMESTAMP");
+  r = r.replace(/\bSYSDATETIME\s*\(\s*\)/gi, "CURRENT_TIMESTAMP");
+  r = r.replace(/\bGETUTCDATE\s*\(\s*\)/gi, "CURRENT_TIMESTAMP");
+  r = r.replace(/\bNEWID\s*\(\s*\)/gi, "''");
+  r = r.replace(/\bNEWSEQUENTIALID\s*\(\s*\)/gi, "''");
+  // CLUSTERED / NONCLUSTERED keywords on PK/UNIQUE/INDEX
+  r = r.replace(/\b(?:NON)?CLUSTERED\b/gi, "");
+  // ASC / DESC after column refs in indexes — sql.js accepts this; safe to keep.
+  // [name] type COLLATE … — strip collations
+  r = r.replace(/\bCOLLATE\s+[\w\d_]+/gi, "");
+  return r;
+}
+
 function preprocessSql(
   sql: string,
-  dialect: "postgresql" | "mysql" | "sqlite"
+  dialect: "postgresql" | "mysql" | "sqlite" | "mssql"
 ): string {
   let r = preprocessCommon(sql);
   if (dialect === "mysql") r = preprocessMysql(r);
   else if (dialect === "postgresql") r = preprocessPostgres(r);
+  else if (dialect === "mssql") r = preprocessMssql(r);
   return r;
 }
 
@@ -294,10 +368,11 @@ function buildAutoincMap(originalSql: string): Map<string, Set<string>> {
   const statements = splitSqlStatements(originalSql);
   for (const stmt of statements) {
     const tableMatch = stmt.match(
-      /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"]?\w+[`"]?\s*\.\s*)?[`"]?(\w+)[`"]?/i
+      /^\s*CREATE\s+(?:TEMP(?:ORARY)?\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:(?:[`"]?\w+[`"]?|\[\w+\])\s*\.\s*)?(?:[`"]?(\w+)[`"]?|\[(\w+)\])/i
     );
     if (!tableMatch) continue;
-    const tableName = tableMatch[1].toLowerCase();
+    const tableName = (tableMatch[1] ?? tableMatch[2] ?? "").toLowerCase();
+    if (!tableName) continue;
     const cols = new Set<string>();
 
     const parenStart = stmt.indexOf("(");
@@ -307,14 +382,16 @@ function buildAutoincMap(originalSql: string): Map<string, Set<string>> {
     const body = stmt.substring(parenStart + 1, parenEnd);
     for (const part of splitTopLevelCommas(body)) {
       const trimmed = part.trim();
-      const colMatch = trimmed.match(/^[`"]?(\w+)[`"]?(?:\s|$)/);
+      const colMatch = trimmed.match(/^(?:[`"]?(\w+)[`"]?|\[(\w+)\])(?:\s|$)/);
       if (!colMatch) continue;
-      const colName = colMatch[1];
+      const colName = colMatch[1] ?? colMatch[2];
+      if (!colName) continue;
       if (NON_COLUMN_KEYWORDS.has(colName.toUpperCase())) continue;
       if (
         /\b(?:AUTO_INCREMENT|AUTOINCREMENT|BIGSERIAL|SMALLSERIAL|SERIAL)\b/i.test(
           trimmed
-        )
+        ) ||
+        /\bIDENTITY\s*(?:\(\s*\d+\s*,\s*\d+\s*\))?/i.test(trimmed)
       ) {
         cols.add(colName.toLowerCase());
       }
@@ -344,7 +421,7 @@ export async function parseSqlToSchema(
     throw new Error("SQL is empty.");
   }
 
-  const resolvedDialect: "postgresql" | "mysql" | "sqlite" =
+  const resolvedDialect: "postgresql" | "mysql" | "sqlite" | "mssql" =
     dialect === "auto" ? detectDialect(trimmed) : dialect;
 
   const autoincMap = buildAutoincMap(trimmed);

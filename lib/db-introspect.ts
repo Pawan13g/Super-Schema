@@ -12,7 +12,7 @@ import type {
 } from "./types";
 import { TABLE_COLORS } from "./types";
 
-export type IntrospectDialect = "postgresql" | "mysql";
+export type IntrospectDialect = "postgresql" | "mysql" | "mssql";
 
 const MAX_TABLES = 200;
 const CONN_TIMEOUT_MS = 8000;
@@ -33,22 +33,31 @@ function genId(prefix: string): string {
 // "int8", "timestamp without time zone", etc).
 function mapDbType(raw: string): ColumnType {
   const t = raw.toLowerCase();
-  if (t.includes("uuid")) return "UUID";
+  if (t.includes("uuid") || t.includes("uniqueidentifier")) return "UUID";
   if (t.includes("bigserial") || t.includes("bigint")) return "BIGINT";
-  if (t.includes("smallserial") || t.includes("smallint")) return "SMALLINT";
+  if (t.includes("smallserial") || t.includes("smallint") || t === "tinyint")
+    return "SMALLINT";
   if (t.includes("serial")) return "SERIAL";
   if (t.includes("int")) return "INT";
   if (t.includes("double") || t.includes("real")) return "DOUBLE";
   if (t.includes("float")) return "FLOAT";
-  if (t.includes("decimal") || t.includes("numeric")) return "DECIMAL";
-  if (t.includes("bool") || t === "tinyint(1)") return "BOOLEAN";
+  if (t.includes("decimal") || t.includes("numeric") || t.includes("money"))
+    return "DECIMAL";
+  if (t.includes("bool") || t === "tinyint(1)" || t === "bit") return "BOOLEAN";
   if (t.includes("jsonb") || t.includes("json")) return "JSON";
-  if (t.includes("blob") || t.includes("bytea")) return "BLOB";
+  if (
+    t.includes("blob") ||
+    t.includes("bytea") ||
+    t.includes("varbinary") ||
+    t === "image" ||
+    t === "rowversion"
+  )
+    return "BLOB";
   if (t.includes("timestamp")) return "TIMESTAMP";
   if (t.includes("datetime")) return "DATETIME";
   if (t.includes("date")) return "DATE";
   if (t.includes("time")) return "TIME";
-  if (t.includes("text")) return "TEXT";
+  if (t.includes("text") || t.includes("ntext")) return "TEXT";
   if (t.includes("char")) return "VARCHAR";
   return "VARCHAR";
 }
@@ -244,6 +253,195 @@ async function introspectMysql(connectionString: string): Promise<Schema> {
   }
 }
 
+// ─── SQL Server (T-SQL) ────────────────────────────────────────────────
+
+async function introspectMssql(connectionString: string): Promise<Schema> {
+  // Lazy-import so the package isn't pulled into bundles where it isn't used.
+  const mssql = await import("mssql");
+  const config = {
+    ...parseMssqlConn(connectionString),
+    requestTimeout: QUERY_TIMEOUT_MS,
+    connectionTimeout: CONN_TIMEOUT_MS,
+  } as unknown as import("mssql").config;
+  const pool = new mssql.ConnectionPool(config);
+  await pool.connect();
+  try {
+    const colsRes = await pool.request().query<{
+      table_name: string;
+      column_name: string;
+      data_type: string;
+      is_nullable: string;
+      column_default: string | null;
+      is_identity: number;
+    }>(
+      `SELECT
+         c.TABLE_NAME AS table_name,
+         c.COLUMN_NAME AS column_name,
+         c.DATA_TYPE AS data_type,
+         c.IS_NULLABLE AS is_nullable,
+         c.COLUMN_DEFAULT AS column_default,
+         COLUMNPROPERTY(OBJECT_ID(c.TABLE_SCHEMA + '.' + c.TABLE_NAME), c.COLUMN_NAME, 'IsIdentity') AS is_identity
+       FROM INFORMATION_SCHEMA.COLUMNS c
+       JOIN INFORMATION_SCHEMA.TABLES t
+         ON t.TABLE_NAME = c.TABLE_NAME AND t.TABLE_SCHEMA = c.TABLE_SCHEMA
+       WHERE t.TABLE_TYPE = 'BASE TABLE'
+         AND c.TABLE_SCHEMA = SCHEMA_NAME()
+       ORDER BY c.TABLE_NAME, c.ORDINAL_POSITION`
+    );
+
+    const conRes = await pool.request().query<{
+      table_name: string;
+      column_name: string;
+      constraint_type: string;
+    }>(
+      `SELECT
+         tc.TABLE_NAME AS table_name,
+         kcu.COLUMN_NAME AS column_name,
+         tc.CONSTRAINT_TYPE AS constraint_type
+       FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS tc
+       JOIN INFORMATION_SCHEMA.KEY_COLUMN_USAGE kcu
+         ON tc.CONSTRAINT_NAME = kcu.CONSTRAINT_NAME
+        AND tc.TABLE_SCHEMA = kcu.TABLE_SCHEMA
+       WHERE tc.TABLE_SCHEMA = SCHEMA_NAME()
+         AND tc.CONSTRAINT_TYPE IN ('PRIMARY KEY', 'UNIQUE')`
+    );
+
+    const fkRes = await pool.request().query<{
+      src_table: string;
+      src_column: string;
+      tgt_table: string;
+      tgt_column: string;
+    }>(
+      `SELECT
+         OBJECT_NAME(fk.parent_object_id) AS src_table,
+         pc.name AS src_column,
+         OBJECT_NAME(fk.referenced_object_id) AS tgt_table,
+         rc.name AS tgt_column
+       FROM sys.foreign_keys fk
+       JOIN sys.foreign_key_columns fkc ON fkc.constraint_object_id = fk.object_id
+       JOIN sys.columns pc
+         ON pc.object_id = fkc.parent_object_id AND pc.column_id = fkc.parent_column_id
+       JOIN sys.columns rc
+         ON rc.object_id = fkc.referenced_object_id AND rc.column_id = fkc.referenced_column_id
+       WHERE SCHEMA_NAME(fk.schema_id) = SCHEMA_NAME()`
+    );
+
+    const idxRes = await pool.request().query<{
+      table_name: string;
+      index_name: string;
+      column_name: string;
+      is_unique: number;
+      is_primary: number;
+    }>(
+      `SELECT
+         OBJECT_NAME(i.object_id) AS table_name,
+         i.name AS index_name,
+         c.name AS column_name,
+         CAST(i.is_unique AS INT) AS is_unique,
+         CAST(i.is_primary_key AS INT) AS is_primary
+       FROM sys.indexes i
+       JOIN sys.index_columns ic
+         ON ic.object_id = i.object_id AND ic.index_id = i.index_id
+       JOIN sys.columns c
+         ON c.object_id = ic.object_id AND c.column_id = ic.column_id
+       JOIN sys.tables t ON t.object_id = i.object_id
+       WHERE i.name IS NOT NULL
+         AND SCHEMA_NAME(t.schema_id) = SCHEMA_NAME()`
+    );
+
+    const cols = colsRes.recordset.map((r) => ({
+      table_name: String(r.table_name),
+      column_name: String(r.column_name),
+      data_type: String(r.data_type),
+      is_nullable: String(r.is_nullable),
+      column_default: r.column_default == null ? null : String(r.column_default),
+      extra: r.is_identity === 1 ? "auto_increment" : "",
+    }));
+
+    return assembleSchema(
+      cols,
+      conRes.recordset.map((r) => ({
+        table_name: String(r.table_name),
+        column_name: String(r.column_name),
+        constraint_type: String(r.constraint_type),
+      })),
+      fkRes.recordset.map((r) => ({
+        src_table: String(r.src_table),
+        src_column: String(r.src_column),
+        tgt_table: String(r.tgt_table),
+        tgt_column: String(r.tgt_column),
+      })),
+      idxRes.recordset.map((r) => ({
+        table_name: String(r.table_name),
+        index_name: String(r.index_name),
+        column_name: String(r.column_name),
+        is_unique: r.is_unique === 1,
+        is_primary: r.is_primary === 1,
+      }))
+    );
+  } finally {
+    await pool.close().catch(() => {});
+  }
+}
+
+// Accepts either an ADO-style connection string or a URL form
+// (mssql://user:pass@host:port/db?option=value). Returns a node-mssql config
+// object. Defaults Encrypt=true and TrustServerCertificate=true so localhost
+// dev installs and Azure SQL both work.
+function parseMssqlConn(input: string): Record<string, unknown> {
+  const trimmed = input.trim();
+  const baseOptions = { encrypt: true, trustServerCertificate: true };
+
+  if (/^mssql(?:\+tedious)?:\/\//i.test(trimmed)) {
+    const url = new URL(trimmed.replace(/^mssql\+tedious:\/\//i, "mssql://"));
+    const port = url.port ? Number(url.port) : 1433;
+    const database = decodeURIComponent(url.pathname.replace(/^\//, "")) || "master";
+    const user = decodeURIComponent(url.username || "");
+    const password = decodeURIComponent(url.password || "");
+    const opts: Record<string, unknown> = {
+      server: url.hostname,
+      port,
+      database,
+      user,
+      password,
+      options: { ...baseOptions },
+    };
+    const encrypt = url.searchParams.get("encrypt");
+    const trust = url.searchParams.get("trustServerCertificate");
+    if (encrypt != null) (opts.options as Record<string, unknown>).encrypt = encrypt === "true";
+    if (trust != null)
+      (opts.options as Record<string, unknown>).trustServerCertificate = trust === "true";
+    return opts;
+  }
+
+  // ADO-style: "Server=host,port;Database=db;User Id=u;Password=p;Encrypt=true"
+  const pairs = trimmed
+    .split(";")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const map = new Map<string, string>();
+  for (const p of pairs) {
+    const eq = p.indexOf("=");
+    if (eq < 0) continue;
+    map.set(p.slice(0, eq).trim().toLowerCase(), p.slice(eq + 1).trim());
+  }
+  const serverRaw = map.get("server") ?? map.get("data source") ?? "localhost";
+  const [serverHost, serverPort] = serverRaw.split(/[,:]/);
+  const opts: Record<string, unknown> = {
+    server: serverHost,
+    port: serverPort ? Number(serverPort) : 1433,
+    database: map.get("database") ?? map.get("initial catalog") ?? "master",
+    user: map.get("user id") ?? map.get("uid") ?? map.get("user"),
+    password: map.get("password") ?? map.get("pwd"),
+    options: {
+      encrypt: (map.get("encrypt") ?? "true").toLowerCase() !== "false",
+      trustServerCertificate:
+        (map.get("trustservercertificate") ?? "true").toLowerCase() !== "false",
+    },
+  };
+  return opts;
+}
+
 // ─── Assembly ───────────────────────────────────────────────────────────
 
 function assembleSchema(
@@ -406,5 +604,6 @@ export async function introspectDatabase(
   connectionString: string
 ): Promise<Schema> {
   if (dialect === "postgresql") return introspectPostgres(connectionString);
+  if (dialect === "mssql") return introspectMssql(connectionString);
   return introspectMysql(connectionString);
 }

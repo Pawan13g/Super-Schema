@@ -26,7 +26,7 @@ type SqlTab = (typeof VALID_TABS)[number];
 const isSqlTab = (v: unknown): v is SqlTab =>
   typeof v === "string" && (VALID_TABS as readonly string[]).includes(v);
 const isDialect = (v: unknown): v is SqlDialect =>
-  v === "postgresql" || v === "mysql" || v === "sqlite";
+  v === "postgresql" || v === "mysql" || v === "sqlite" || v === "mssql";
 const isModelTarget = (v: unknown): v is ModelTarget =>
   v === "prisma" ||
   v === "sequelize" ||
@@ -89,8 +89,8 @@ export function SqlPreview() {
 
   const sql = useMemo(() => generateSql(schema, dialect), [schema, dialect]);
   const models = useMemo(
-    () => generateModels(schema, modelTarget),
-    [schema, modelTarget]
+    () => generateModels(schema, modelTarget, dialect),
+    [schema, modelTarget, dialect]
   );
 
   const handleCopy = async () => {
@@ -235,6 +235,9 @@ export function SqlPreview() {
                   </TabsTrigger>
                   <TabsTrigger value="sqlite" className="text-[10px] px-2 h-5">
                     SQLite
+                  </TabsTrigger>
+                  <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
+                    SQL Server
                   </TabsTrigger>
                 </TabsList>
               </Tabs>
@@ -408,6 +411,9 @@ export function SqlPreview() {
                   </TabsTrigger>
                   <TabsTrigger value="sqlite" className="text-[10px] px-2 h-5">
                     SQLite
+                  </TabsTrigger>
+                  <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
+                    SQL Server
                   </TabsTrigger>
                 </TabsList>
               </Tabs>

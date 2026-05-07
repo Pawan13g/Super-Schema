@@ -1,6 +1,6 @@
 import type { Schema, Table, Column, Relation, ColumnType } from "./types";
 
-export type SqlDialect = "postgresql" | "mysql" | "sqlite";
+export type SqlDialect = "postgresql" | "mysql" | "sqlite" | "mssql";
 
 // Map our generic types to dialect-specific types
 const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
@@ -64,6 +64,30 @@ const TYPE_MAP: Record<SqlDialect, Partial<Record<ColumnType, string>>> = {
     UUID: "TEXT",
     BLOB: "BLOB",
   },
+  // SQL Server (T-SQL). Notes:
+  // - TIMESTAMP in T-SQL is rowversion, not date-time — use DATETIME2.
+  // - JSON has no native type pre-2025; NVARCHAR(MAX) + ISJSON CHECK is idiomatic.
+  // - TEXT/NTEXT are deprecated; map to NVARCHAR(MAX).
+  mssql: {
+    INT: "INT",
+    BIGINT: "BIGINT",
+    SMALLINT: "SMALLINT",
+    SERIAL: "INT IDENTITY(1,1)",
+    FLOAT: "REAL",
+    DOUBLE: "FLOAT",
+    DECIMAL: "DECIMAL(18,2)",
+    BOOLEAN: "BIT",
+    VARCHAR: "NVARCHAR(255)",
+    TEXT: "NVARCHAR(MAX)",
+    CHAR: "NCHAR(1)",
+    DATE: "DATE",
+    TIMESTAMP: "DATETIME2",
+    DATETIME: "DATETIME2",
+    TIME: "TIME",
+    JSON: "NVARCHAR(MAX)",
+    UUID: "UNIQUEIDENTIFIER",
+    BLOB: "VARBINARY(MAX)",
+  },
 };
 
 function mapType(type: ColumnType, dialect: SqlDialect): string {
@@ -72,6 +96,7 @@ function mapType(type: ColumnType, dialect: SqlDialect): string {
 
 function quoteIdentifier(name: string, dialect: SqlDialect): string {
   if (dialect === "mysql") return `\`${name}\``;
+  if (dialect === "mssql") return `[${name.replace(/]/g, "]]")}]`;
   return `"${name}"`;
 }
 
@@ -111,6 +136,20 @@ function generateColumnDef(col: Column, dialect: SqlDialect): string {
     return parts.join(" ");
   }
 
+  // SQL Server SERIAL → INT IDENTITY(1,1). The IDENTITY tag is already part of
+  // the mapped type; AUTO_INCREMENT constraint is implicit.
+  if (dialect === "mssql" && col.type === "SERIAL") {
+    parts.push(mappedType);
+    for (const c of col.constraints) {
+      if (c === "AUTO_INCREMENT") continue;
+      if (c === "PRIMARY KEY") parts.push("PRIMARY KEY");
+      if (c === "NOT NULL") parts.push("NOT NULL");
+      if (c === "UNIQUE") parts.push("UNIQUE");
+      if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
+    }
+    return parts.join(" ");
+  }
+
   parts.push(mappedType);
 
   for (const c of col.constraints) {
@@ -119,6 +158,7 @@ function generateColumnDef(col: Column, dialect: SqlDialect): string {
     if (c === "UNIQUE") parts.push("UNIQUE");
     if (c === "AUTO_INCREMENT") {
       if (dialect === "mysql") parts.push("AUTO_INCREMENT");
+      else if (dialect === "mssql") parts.push("IDENTITY(1,1)");
       // PostgreSQL uses SERIAL type instead; SQLite handled above
     }
     if (c === "DEFAULT" && col.defaultValue) parts.push(`DEFAULT ${col.defaultValue}`);
@@ -192,6 +232,13 @@ function resolveIndexMethod(
     // Everything else (gin, gist, brin, spgist, btree) collapses to BTREE.
     return { syntaxKind: "regular", using: null };
   }
+  if (dialect === "mssql") {
+    // SQL Server only supports clustered/nonclustered B-tree-style indexes
+    // and (separately) full-text catalogs / spatial via different syntax.
+    // Map fulltext/spatial down to a regular index — full-text catalog setup
+    // is out of scope for declarative DDL emit.
+    return { syntaxKind: "regular", using: null };
+  }
   // SQLite ignores method entirely.
   return { syntaxKind: "regular", using: null };
 }
@@ -256,6 +303,12 @@ function generateCommentStatements(table: Table, dialect: SqlDialect): string[] 
       statements.push(`COMMENT ON TABLE ${q(table.name)} IS ${tableComment};`);
     } else if (dialect === "mysql") {
       statements.push(`ALTER TABLE ${q(table.name)} COMMENT = ${tableComment};`);
+    } else if (dialect === "mssql") {
+      statements.push(
+        `EXEC sp_addextendedproperty 'MS_Description', ${tableComment}, 'SCHEMA', 'dbo', 'TABLE', ${quoteStringLiteral(
+          table.name
+        )};`
+      );
     } else {
       statements.push(`-- Comment on ${table.name}: ${table.comment.trim()}`);
     }
@@ -267,6 +320,12 @@ function generateCommentStatements(table: Table, dialect: SqlDialect): string[] 
 
     if (dialect === "postgresql") {
       statements.push(`COMMENT ON COLUMN ${q(table.name)}.${q(col.name)} IS ${columnComment};`);
+    } else if (dialect === "mssql") {
+      statements.push(
+        `EXEC sp_addextendedproperty 'MS_Description', ${columnComment}, 'SCHEMA', 'dbo', 'TABLE', ${quoteStringLiteral(
+          table.name
+        )}, 'COLUMN', ${quoteStringLiteral(col.name)};`
+      );
     } else if (dialect === "sqlite") {
       statements.push(`-- Comment on ${table.name}.${col.name}: ${col.comment.trim()}`);
     }

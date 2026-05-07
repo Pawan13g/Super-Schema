@@ -9,7 +9,7 @@ import type { Schema } from "@/lib/types";
 const bodySchema = z.object({
   leftId: z.string().min(1),
   rightId: z.string().min(1),
-  dialect: z.enum(["postgresql", "mysql", "sqlite"]).optional(),
+  dialect: z.enum(["postgresql", "mysql", "sqlite", "mssql"]).optional(),
 });
 
 export async function POST(request: NextRequest) {

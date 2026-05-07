@@ -46,19 +46,37 @@ export function CollabToggle({ className }: CollabToggleProps) {
   // Mount-gate so SSR snapshot stays inert and we only spin up the WebRTC
   // provider client-side after hydration.
   const [mounted, setMounted] = useState(false);
+  const [urlRoom, setUrlRoom] = useState<string | null>(null);
   // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => setMounted(true), []);
+  useEffect(() => {
+    setMounted(true);
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const room = params.get("room");
+    if (room) {
+      setUrlRoom(room);
+      setEnabled(true);
+    }
+    // setEnabled is stable; URL is read once at mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const identity = {
     name: session?.user?.name ?? session?.user?.email ?? "Guest",
   };
 
+  // Invite URL takes precedence: a recipient's active schema is unrelated
+  // to the room they were invited to. Without this, they'd silently sync
+  // to their own room and never see the host.
+  const effectiveRoom = urlRoom ?? activeSchemaId;
+
   const collab = useCollab({
-    roomId: mounted && enabled && activeSchemaId ? activeSchemaId : null,
+    roomId: mounted && enabled && effectiveRoom ? effectiveRoom : null,
     enabled: mounted && enabled,
     identity,
     schema,
     onRemoteSchema: (next) => replaceSchema(next),
+    joinAsGuest: urlRoom !== null,
   });
 
   const peerCount = collab.peers.length;
@@ -69,8 +87,8 @@ export function CollabToggle({ className }: CollabToggleProps) {
   );
 
   const inviteUrl =
-    typeof window !== "undefined" && activeSchemaId
-      ? `${window.location.origin}/?room=${activeSchemaId}`
+    typeof window !== "undefined" && effectiveRoom
+      ? `${window.location.origin}/?room=${effectiveRoom}`
       : "";
 
   const copyInvite = async () => {
@@ -101,7 +119,7 @@ export function CollabToggle({ className }: CollabToggleProps) {
     void copyInvite();
   };
 
-  if (!activeSchemaId) return null;
+  if (!effectiveRoom) return null;
 
   return (
     <div className={cn("flex items-center gap-1.5", className)}>

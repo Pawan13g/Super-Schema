@@ -14,11 +14,11 @@
 Building a database schema usually means juggling whiteboards, ER diagrams, half-baked SQL files, and ORM model files that drift apart. Super Schema collapses all of that into one canvas:
 
 - **Visual ERD** — drag tables onto a canvas, draw FK relations between columns, get instant SQL.
-- **Multi-dialect** — PostgreSQL, MySQL, SQLite output. Switch dialects with one click.
+- **Multi-dialect** — PostgreSQL, MySQL, SQLite, SQL Server output. Switch dialects with one click.
 - **AI co-pilot** — bring your own key for Google, OpenAI, Anthropic, Mistral, Grok, OpenRouter, AWS Bedrock, or Ollama (local). Generate schemas from plain English, fix bad design, write queries, document tables.
 - **Real-time multiplayer** — flip on Live mode and edit the same schema with teammates. Yjs-backed CRDT sync, peer avatars, no extra setup.
 - **PR-style reviews** — propose schema changes, share a diff, get approval, merge. Schema versioning is built in.
-- **Live DB import** — point at a running Postgres or MySQL, pull the existing schema, edit visually.
+- **Live DB import** — point at a running Postgres, MySQL, or SQL Server, pull the existing schema, edit visually.
 - **One-click exports** — `.sql`, `.json`, `schema.prisma`, Sequelize models, DBML, GraphQL SDL, OpenAPI 3.1, ER PNG — or grab them all as a ZIP.
 
 ## Features at a glance

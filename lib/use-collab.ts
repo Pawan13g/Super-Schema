@@ -24,6 +24,12 @@ interface UseCollabOptions {
   identity: { name: string };
   schema: Schema;
   onRemoteSchema: (schema: Schema) => void;
+  // When true, never seed our local schema into the doc and never push local
+  // edits until we've received a remote snapshot. This is for users who
+  // joined via an invite link — their local store is unrelated to the
+  // host's schema, so seeding would silently overwrite the host's data the
+  // moment the host connects.
+  joinAsGuest?: boolean;
 }
 
 /**
@@ -32,8 +38,9 @@ interface UseCollabOptions {
  * prevent feedback loops.
  */
 export function useCollab(opts: UseCollabOptions): CollabState {
-  const { roomId, enabled, identity, schema, onRemoteSchema } = opts;
+  const { roomId, enabled, identity, schema, onRemoteSchema, joinAsGuest } = opts;
   const sessionRef = useRef<CollabSession | null>(null);
+  const guestAdoptedRef = useRef(false);
   // Sentinel object used as a Yjs transaction origin so we can ignore our
   // own writes when reading back update events. Yjs requires an object (not
   // a Symbol), so a frozen empty object suffices.
@@ -70,6 +77,7 @@ export function useCollab(opts: UseCollabOptions): CollabState {
       const json = JSON.stringify(remote);
       if (json === lastWrittenJsonRef.current) return;
       lastWrittenJsonRef.current = json;
+      guestAdoptedRef.current = true;
       onRemoteSchema(remote);
     };
     session.doc.on("update", onUpdate);
@@ -100,10 +108,13 @@ export function useCollab(opts: UseCollabOptions): CollabState {
       const initial = readSchemaFromDoc(session.schemaMap);
       if (initial) {
         lastWrittenJsonRef.current = JSON.stringify(initial);
+        guestAdoptedRef.current = true;
         onRemoteSchema(initial);
-      } else {
+      } else if (!joinAsGuest) {
         // Genuinely first peer — push our local state so the next peer to
-        // join inherits it.
+        // join inherits it. Skip for guests joining via invite link: their
+        // local schema is unrelated to the host's, and seeding would
+        // overwrite the host's data once they connect.
         writeSchemaToDoc(
           session.doc,
           session.schemaMap,
@@ -117,13 +128,14 @@ export function useCollab(opts: UseCollabOptions): CollabState {
     // Belt-and-braces: if no peer responds within 1.5s assume we're alone
     // and seed anyway. y-webrtc's `synced` event only fires after at least
     // one peer connection completes, so a truly solo session would hang
-    // without this fallback.
-    const seedTimer = setTimeout(seedIfFirst, 1500);
+    // without this fallback. Guests skip the auto-seed and stay in
+    // connecting state until the host pushes a snapshot.
+    const seedTimer = joinAsGuest ? null : setTimeout(seedIfFirst, 1500);
 
     setPeers(listPeers(session.provider));
 
     return () => {
-      clearTimeout(seedTimer);
+      if (seedTimer) clearTimeout(seedTimer);
       session.doc.off("update", onUpdate);
       session.provider.awareness.off("change", onAwareness);
       session.provider.off("peers", onPeers);
@@ -136,7 +148,7 @@ export function useCollab(opts: UseCollabOptions): CollabState {
     // session lifecycle is keyed only on enable + room. Schema changes are
     // pushed by the second effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, roomId, identity.name]);
+  }, [enabled, roomId, identity.name, joinAsGuest]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Push local schema changes into the Y.Doc.
@@ -144,6 +156,10 @@ export function useCollab(opts: UseCollabOptions): CollabState {
     if (!enabled) return;
     const session = sessionRef.current;
     if (!session) return;
+    // Guest hasn't received the host's snapshot yet — any local edit at this
+    // point is from their unrelated local store and would overwrite the host
+    // on join. Block writes until guestAdoptedRef flips.
+    if (joinAsGuest && !guestAdoptedRef.current) return;
     const json = JSON.stringify(schema);
     if (json === lastWrittenJsonRef.current) return;
     lastWrittenJsonRef.current = json;
@@ -153,7 +169,7 @@ export function useCollab(opts: UseCollabOptions): CollabState {
       schema,
       localOriginRef.current
     );
-  }, [enabled, schema]);
+  }, [enabled, schema, joinAsGuest]);
 
   return { enabled, status, peers };
 }

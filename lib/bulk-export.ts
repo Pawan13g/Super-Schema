@@ -31,6 +31,7 @@ export async function bulkExport(
   entries.push({ name: `${base}.pgsql.sql`, data: generateSql(schema, "postgresql") });
   entries.push({ name: `${base}.mysql.sql`, data: generateSql(schema, "mysql") });
   entries.push({ name: `${base}.sqlite.sql`, data: generateSql(schema, "sqlite") });
+  entries.push({ name: `${base}.mssql.sql`, data: generateSql(schema, "mssql") });
   entries.push({
     name: `${base}.json`,
     data: JSON.stringify(schema, null, 2),

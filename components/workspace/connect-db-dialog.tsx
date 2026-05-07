@@ -30,7 +30,7 @@ import {
   ShieldCheck,
 } from "lucide-react";
 
-type Dialect = "postgresql" | "mysql";
+type Dialect = "postgresql" | "mysql" | "mssql";
 
 interface ConnectDbDialogProps {
   open: boolean;
@@ -40,6 +40,7 @@ interface ConnectDbDialogProps {
 const PLACEHOLDER: Record<Dialect, string> = {
   postgresql: "postgres://user:pass@host:5432/dbname",
   mysql: "mysql://user:pass@host:3306/dbname",
+  mssql: "mssql://user:pass@host:1433/dbname  or  Server=host,1433;Database=db;User Id=u;Password=p",
 };
 
 export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
@@ -142,8 +143,9 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
             Connect to live database
           </DialogTitle>
           <DialogDescription>
-            Read schema from a running PostgreSQL or MySQL instance. Read-only —
-            credentials are used once for the connection and never stored.
+            Read schema from a running PostgreSQL, MySQL, or SQL Server instance.
+            Read-only — credentials are used once for the connection and never
+            stored.
           </DialogDescription>
         </DialogHeader>
 
@@ -159,6 +161,10 @@ export function ConnectDbDialog({ open, onOpenChange }: ConnectDbDialogProps) {
                 <TabsTrigger value="mysql" className="gap-1 px-3 text-xs">
                   <Database className="size-3" />
                   MySQL
+                </TabsTrigger>
+                <TabsTrigger value="mssql" className="gap-1 px-3 text-xs">
+                  <Database className="size-3" />
+                  SQL Server
                 </TabsTrigger>
               </TabsList>
             </Tabs>
