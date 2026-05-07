@@ -7,12 +7,15 @@ import {
   rateLimitResponse,
 } from "@/lib/rate-limit";
 import type { Schema } from "@/lib/types";
+import { requireJsonContentType } from "@/lib/csrf";
 
 // 30 mock-query executions / minute / IP — enough for interactive use,
 // blocks burst abuse against the in-memory SQLite sandbox.
 const RATE_OPTS = { windowMs: 60_000, max: 30 };
 
 export async function POST(request: NextRequest) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

@@ -82,6 +82,7 @@ export function SchemaCanvas() {
     updateTableName,
     updateColumn,
     addRelation,
+    updateRelation,
     addTable,
     addColumn,
     removeTable,
@@ -95,7 +96,112 @@ export function SchemaCanvas() {
     canUndo,
     canRedo,
   } = useSchema();
-  const { saveNow, loading: workspaceLoading } = useWorkspace();
+  const {
+    saveNow,
+    loading: workspaceLoading,
+    activeSchemaId,
+  } = useWorkspace();
+
+  // Per-schema viewport (zoom + pan) persisted in localStorage so switching
+  // tabs and coming back lands the user where they were. Keyed by schema id.
+  const VIEWPORT_KEY = (id: string) => `super-schema:viewport:${id}`;
+  const lastSavedSchemaRef = useRef<string | null>(null);
+  const restoredForSchemaRef = useRef<string | null>(null);
+  const viewportSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null
+  );
+
+  // Writes the current React Flow viewport to localStorage. RF fires
+  // `onMoveEnd` *per intent* (each pinch / pan gesture, each scroll burst)
+  // — on a fast trackpad that's dozens of writes a second. Coalesce them
+  // through a 250 ms debounce so we hit storage at most ~4× / second
+  // during continuous panning.
+  const saveViewport = useCallback(() => {
+    if (typeof window === "undefined") return;
+    if (viewportSaveTimerRef.current) {
+      clearTimeout(viewportSaveTimerRef.current);
+    }
+    viewportSaveTimerRef.current = setTimeout(() => {
+      viewportSaveTimerRef.current = null;
+      const inst = reactFlowInstanceRef.current;
+      const id = activeSchemaId;
+      if (!inst || !id) return;
+      try {
+        const v = inst.getViewport();
+        window.localStorage.setItem(VIEWPORT_KEY(id), JSON.stringify(v));
+      } catch {
+        /* quota / disabled — ignore */
+      }
+    }, 250);
+  }, [activeSchemaId]);
+
+  // On unmount, clear the debounce so we don't fire against a torn-down
+  // tree. The "save before schema flips" effect below handles the case
+  // where we genuinely *do* want a synchronous save (it bypasses the
+  // debounce by reading getViewport directly).
+  useEffect(
+    () => () => {
+      if (viewportSaveTimerRef.current) {
+        clearTimeout(viewportSaveTimerRef.current);
+        viewportSaveTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  const restoreViewport = useCallback((id: string) => {
+    const inst = reactFlowInstanceRef.current;
+    if (!inst || typeof window === "undefined") return false;
+    try {
+      const raw = window.localStorage.getItem(VIEWPORT_KEY(id));
+      if (!raw) return false;
+      const v = JSON.parse(raw) as { x: number; y: number; zoom: number };
+      if (
+        typeof v?.x !== "number" ||
+        typeof v?.y !== "number" ||
+        typeof v?.zoom !== "number"
+      ) {
+        return false;
+      }
+      inst.setViewport(v, { duration: 0 });
+      return true;
+    } catch {
+      return false;
+    }
+  }, []);
+
+  // Save current viewport before the active schema flips so we don't lose it
+  // when the next schema loads and overwrites the canvas. Then restore the
+  // new schema's saved viewport (if any) once nodes have re-synced.
+  useEffect(() => {
+    if (
+      lastSavedSchemaRef.current &&
+      lastSavedSchemaRef.current !== activeSchemaId
+    ) {
+      const prevId = lastSavedSchemaRef.current;
+      const inst = reactFlowInstanceRef.current;
+      if (inst && typeof window !== "undefined") {
+        try {
+          const v = inst.getViewport();
+          window.localStorage.setItem(VIEWPORT_KEY(prevId), JSON.stringify(v));
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+    lastSavedSchemaRef.current = activeSchemaId ?? null;
+    // Try to restore the new schema's viewport. The fitView in onInit /
+    // sync may have already run; setViewport with duration:0 overrides it.
+    if (activeSchemaId) {
+      const id = activeSchemaId;
+      // Two rAFs: one for React commit, one for RF measurement.
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          restoreViewport(id);
+        });
+      });
+    }
+  }, [activeSchemaId, restoreViewport]);
 
   const { resolvedTheme } = useTheme();
   const isMobile = useIsMobile();
@@ -205,28 +311,46 @@ export function SchemaCanvas() {
 
     // Wait for React to commit new positions + React Flow to measure, then
     // zoom-to-fit. Double rAF ensures the layout paint has completed.
+    // After fitView lands we persist the new viewport so it survives a
+    // schema-tab switch — otherwise the next time the user comes back to
+    // this schema, the saved viewport (pre-arrange) would override the
+    // freshly-arranged layout.
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        reactFlowInstanceRef.current?.fitView({
+        const inst = reactFlowInstanceRef.current;
+        if (!inst) return;
+        inst.fitView({
           padding: 0.2,
           duration: 500,
           includeHiddenNodes: false,
         });
+        // fitView animates over `duration`. Persist the final viewport
+        // after the animation settles.
+        setTimeout(() => saveViewport(), 550);
       });
     });
-  }, [schema, setTablePositions]);
+  }, [schema, setTablePositions, saveViewport]);
 
   // Sync schema → React Flow nodes. RF owns measured dimensions / drag
   // positions; schema owns identity + persisted position. Skip sync while a
   // drag is in flight; flush on drag-stop.
+  //
+  // Reads `selectedTableId` via `selectedTableIdRef.current` rather than the
+  // captured-by-closure value. The ref is updated synchronously on every
+  // selection change, so a sync triggered by a *non-selection* schema
+  // mutation (e.g. column edit) sees the current selection instead of a
+  // stale one. This avoids the "wrong node visually highlighted after a
+  // schema array change" bug that the closure-only path exhibits when the
+  // effect's dep array doesn't include `selectedTableId`.
   const syncNodesFromSchema = useCallback(() => {
     setNodes((prev) => {
       const prevById = new Map(prev.map((n) => [n.id, n]));
+      const currentSelected = selectedTableIdRef.current;
       return schema.tables.map((table) => {
         const existing = prevById.get(table.id);
         const data = {
           table,
-          selected: table.id === selectedTableId,
+          selected: table.id === currentSelected,
           onSelect: (id: string) => {
             setSelectedTableId(id);
             // On mobile, single tap on a table opens the full-screen edit
@@ -252,7 +376,6 @@ export function SchemaCanvas() {
     });
   }, [
     schema.tables,
-    selectedTableId,
     setSelectedTableId,
     requestDeleteTable,
     updateTableName,
@@ -266,6 +389,17 @@ export function SchemaCanvas() {
     }
     syncNodesFromSchema();
   }, [syncNodesFromSchema]);
+
+  // Re-sync nodes whenever the selected table id flips so the `selected`
+  // flag on each node's data updates without waiting for the next schema
+  // mutation. The sync function reads `selectedTableIdRef` so this effect
+  // just kicks the sync; we deliberately keep `selectedTableId` out of
+  // `syncNodesFromSchema`'s deps to avoid recreating the callback on every
+  // selection change.
+  useEffect(() => {
+    if (draggingRef.current) return;
+    syncNodesFromSchema();
+  }, [selectedTableId, syncNodesFromSchema]);
 
   // Canvas keyboard shortcuts. All bail out of typing surfaces (input,
   // textarea, contenteditable) so they never hijack form input.
@@ -731,16 +865,7 @@ export function SchemaCanvas() {
       const rel = schema.relations.find((r) => r.id === menu.edgeId);
       if (!rel) return [];
       const cycleType = (next: Relation["type"]) => {
-        const newRel: Relation = { ...rel, type: next };
-        // Replace via remove + add (store has no direct update)
-        removeRelation(rel.id);
-        addRelation({
-          sourceTable: newRel.sourceTable,
-          sourceColumn: newRel.sourceColumn,
-          targetTable: newRel.targetTable,
-          targetColumn: newRel.targetColumn,
-          type: newRel.type,
-        });
+        updateRelation(rel.id, { type: next });
       };
       return [
         {
@@ -893,9 +1018,26 @@ export function SchemaCanvas() {
         zoomOnScroll={interactive}
         zoomOnPinch={interactive}
         zoomOnDoubleClick={interactive}
+        // Wide bounds so big schemas can fit on one screen and small details
+        // can be inspected up close. React Flow's defaults (0.5 / 2) felt
+        // restrictive — let users zoom out to a near-thumbnail view and in
+        // for pixel-level inspection.
+        minZoom={0.05}
+        maxZoom={4}
         onInit={(instance) => {
           reactFlowInstanceRef.current = instance;
+          // First time RF mounts for the active schema, restore the saved
+          // viewport. Defer one tick so the initial fitView (from `fitView`
+          // prop) doesn't immediately overwrite our restore.
+          const id = activeSchemaId;
+          if (id && restoredForSchemaRef.current !== id) {
+            restoredForSchemaRef.current = id;
+            requestAnimationFrame(() => {
+              restoreViewport(id);
+            });
+          }
         }}
+        onMoveEnd={() => saveViewport()}
         onNodesChange={onNodesChange}
         onNodeDragStart={onNodeDragStart}
         onNodeDragStop={onNodeDragStop}
@@ -904,17 +1046,18 @@ export function SchemaCanvas() {
         onEdgeClick={onEdgeClick}
         onNodeClick={onNodeClick}
         onSelectionChange={({ nodes: selNodes }) => {
+          // Order-independent compare: RF doesn't guarantee a stable order
+          // for `selNodes` between renders, so a length-then-index loop can
+          // wrongly report "different" and feed back into the render loop
+          // (multiSelectedIds → new edges → new render → onSelectionChange
+          // fires again). Compare as sets via a sorted joined key — same
+          // contents in any order are treated as equal.
           const next = selNodes.map((n) => n.id);
-          // Skip the setState if the array is structurally identical to the
-          // previous one — RF re-fires onSelectionChange on every render
-          // (because edges array changes), which without this guard creates
-          // an infinite loop with multiSelectedIds → new edges → new render.
           setMultiSelectedIds((prev) => {
             if (prev.length !== next.length) return next;
-            for (let i = 0; i < prev.length; i++) {
-              if (prev[i] !== next[i]) return next;
-            }
-            return prev;
+            const a = [...prev].sort().join("");
+            const b = [...next].sort().join("");
+            return a === b ? prev : next;
           });
         }}
         onNodeContextMenu={onNodeContextMenu}

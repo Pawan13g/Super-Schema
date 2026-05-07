@@ -11,6 +11,7 @@ import { ChatOpenAI } from "@langchain/openai";
 import { ChatAnthropic } from "@langchain/anthropic";
 import { ChatMistralAI } from "@langchain/mistralai";
 import { ChatBedrockConverse } from "@langchain/aws";
+import { requireJsonContentType } from "@/lib/csrf";
 import {
   DEFAULT_MODELS,
   type AiProvider,
@@ -37,6 +38,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: NextRequest) {
+  const csrfBlock = requireJsonContentType(req);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

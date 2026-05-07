@@ -69,6 +69,33 @@ function quoteSqliteIdent(name: string): string {
   return `"${name.replace(/"/g, "\"\"")}"`;
 }
 
+// Decide whether a single statement contributes to the schema shape we extract
+// (tables + columns + indexes + alters). Everything else — functions across
+// every PL language, triggers in every flavor, views, policies, sequences,
+// types, comments, partition children, etc. — is skipped without trying to
+// run it through sql.js. This is a positive allow-list rather than a negative
+// strip; that way new keyword combinations don't silently break parsing.
+function isSchemaShapeStatement(stmt: string): boolean {
+  const head = stmt.replace(/^\s+/, "");
+  // CREATE TABLE — but NOT child partition declarations
+  // (`CREATE TABLE x PARTITION OF y FOR VALUES ...`).
+  if (/^CREATE\s+(?:GLOBAL\s+|LOCAL\s+)?(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\b/i.test(head)) {
+    if (/\bPARTITION\s+OF\b/i.test(head)) return false;
+    return true;
+  }
+  // CREATE [UNIQUE] INDEX … — including PG `USING` clauses, partial WHERE.
+  if (/^CREATE\s+(?:UNIQUE\s+)?(?:CLUSTERED\s+|NONCLUSTERED\s+)?(?:FULLTEXT\s+|SPATIAL\s+)?INDEX\b/i.test(head)) {
+    return true;
+  }
+  // ALTER TABLE.
+  if (/^ALTER\s+TABLE\b/i.test(head)) return true;
+  // Everything else (CREATE FUNCTION/TRIGGER/PROCEDURE/VIEW/MATERIALIZED VIEW/
+  // POLICY/RULE/AGGREGATE/OPERATOR/DOMAIN/TYPE/SEQUENCE/EXTENSION/SCHEMA/CAST/
+  // EVENT TRIGGER/PUBLICATION/SUBSCRIPTION/SERVER/USER MAPPING/FOREIGN TABLE
+  // helpers, plus any DROP/COMMENT/SET/GRANT/USE/DELETE/INSERT/UPDATE) — skip.
+  return false;
+}
+
 function splitSqlStatements(sql: string): string[] {
   const statements: string[] = [];
   let current = "";
@@ -77,10 +104,30 @@ function splitSqlStatements(sql: string): string[] {
   let inBacktick = false;
   let inLineComment = false;
   let inBlockComment = false;
+  // Postgres dollar-quoted string state. The opening tag is $tag$ where tag is
+  // any (possibly empty) identifier. Body ends at the same $tag$. Crucially,
+  // semicolons inside a dollar-quoted body are NOT statement terminators —
+  // PL/pgSQL function bodies depend on this.
+  let dollarTag: string | null = null;
 
   for (let i = 0; i < sql.length; i += 1) {
     const char = sql[i];
     const next = sql[i + 1];
+
+    if (dollarTag !== null) {
+      // Look for the closing $tag$.
+      if (char === "$") {
+        const close = `$${dollarTag}$`;
+        if (sql.startsWith(close, i)) {
+          current += close;
+          i += close.length - 1;
+          dollarTag = null;
+          continue;
+        }
+      }
+      current += char;
+      continue;
+    }
 
     if (inLineComment) {
       if (char === "\n") {
@@ -108,6 +155,17 @@ function splitSqlStatements(sql: string): string[] {
         inBlockComment = true;
         i += 1;
         continue;
+      }
+      // Dollar-quote opener: $tag$ (tag = identifier chars or empty).
+      if (char === "$") {
+        const m = sql.slice(i).match(/^\$([A-Za-z_][\w]*|)\$/);
+        if (m) {
+          const opener = m[0];
+          dollarTag = m[1];
+          current += opener;
+          i += opener.length - 1;
+          continue;
+        }
       }
     }
 
@@ -193,19 +251,132 @@ function detectDialect(sql: string): "postgresql" | "mysql" | "sqlite" | "mssql"
   if (/\bsp_addextendedproperty\b/i.test(sql)) return "mssql";
   if (/^\s*GO\s*$/im.test(sql)) return "mssql";
   if (/\[\s*[a-zA-Z_][\w]*\s*\]/.test(sql) && /\bdbo\.\b/i.test(sql)) return "mssql";
-  if (/`/.test(sql)) return "mysql";
-  if (/\bAUTO_INCREMENT\b/i.test(sql)) return "mysql";
-  if (/\bENGINE\s*=/i.test(sql)) return "mysql";
+  // Postgres tells (check before MySQL — backticks are MySQL-only but PG has
+  // many distinguishing markers that should win when present).
   if (/\b(?:BIG|SMALL)?SERIAL\b/i.test(sql)) return "postgresql";
   if (/::\s*\w/.test(sql)) return "postgresql";
   if (/\bJSONB\b/i.test(sql)) return "postgresql";
   if (/\bTIMESTAMPTZ\b/i.test(sql)) return "postgresql";
   if (/\bBYTEA\b/i.test(sql)) return "postgresql";
+  if (/\bgen_random_uuid\s*\(/i.test(sql)) return "postgresql";
+  if (/\buuid_generate_v\d+\s*\(/i.test(sql)) return "postgresql";
+  if (/\bCREATE\s+EXTENSION\b/i.test(sql)) return "postgresql";
+  if (/\bCOMMENT\s+ON\s+(?:TABLE|COLUMN)\b/i.test(sql)) return "postgresql";
+  if (/\bPARTITION\s+BY\s+(?:HASH|RANGE|LIST)\s*\(/i.test(sql)) return "postgresql";
+  if (/\bPARTITION\s+OF\b/i.test(sql)) return "postgresql";
+  if (/\bTSVECTOR\b/i.test(sql)) return "postgresql";
+  if (/\bINET\b/i.test(sql)) return "postgresql";
+  if (/\bCITEXT\b/i.test(sql)) return "postgresql";
+  if (/\bRETURNS\s+TRIGGER\b/i.test(sql)) return "postgresql";
+  if (/\$\$/.test(sql)) return "postgresql";
+  // MySQL tells.
+  if (/`/.test(sql)) return "mysql";
+  if (/\bAUTO_INCREMENT\b/i.test(sql)) return "mysql";
+  if (/\bENGINE\s*=/i.test(sql)) return "mysql";
   return "sqlite";
+}
+
+// Recover from common copy-paste errors inside CREATE TABLE bodies. These
+// are forgiving heuristics that turn a "near (: syntax error" into a
+// successful parse for typical real-world DDL dumps. Each transform is
+// scoped to the body of a single `CREATE TABLE ... ( ... )` so it can't
+// accidentally rewrite unrelated SQL.
+function autoRepairCreateTableBodies(sql: string): string {
+  // Pre-scan to find every CREATE TABLE … ( body ) span using paren matching.
+  // Doing this with regex alone is unreliable (function defaults, nested
+  // parens in CHECK clauses); a depth counter is correct.
+  const out: string[] = [];
+  let cursor = 0;
+  const re = /CREATE\s+(?:TEMP(?:ORARY)?\s+|UNLOGGED\s+)?TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?:[`"]?\w+[`"]?\s*\.\s*)?(?:[`"]?\w+[`"]?|\[\w+\])\s*\(/gi;
+  for (let m; (m = re.exec(sql)); ) {
+    const headerEnd = m.index + m[0].length; // position right after the `(`
+    let i = headerEnd;
+    let depth = 1;
+    let inSingle = false;
+    let inDouble = false;
+    while (i < sql.length && depth > 0) {
+      const c = sql[i];
+      if (inSingle) {
+        if (c === "'") inSingle = false;
+      } else if (inDouble) {
+        if (c === '"') inDouble = false;
+      } else if (c === "'") inSingle = true;
+      else if (c === '"') inDouble = true;
+      else if (c === "(") depth += 1;
+      else if (c === ")") depth -= 1;
+      i += 1;
+    }
+    const closeIdx = i - 1; // position of the matching `)`
+    out.push(sql.slice(cursor, headerEnd));
+    const body = sql.slice(headerEnd, closeIdx);
+    out.push(repairCreateTableBody(body));
+    cursor = closeIdx;
+    re.lastIndex = closeIdx;
+  }
+  out.push(sql.slice(cursor));
+  return out.join("");
+}
+
+function repairCreateTableBody(body: string): string {
+  let b = body;
+
+  // (1) Insert a comma when a table-level constraint clause (PRIMARY KEY,
+  //     UNIQUE, FOREIGN KEY, CHECK, CONSTRAINT) starts on a new line right
+  //     after a column definition that wasn't terminated with a comma. This
+  //     is the #1 paste error: "...CURRENT_TIMESTAMP\n\n PRIMARY KEY (...)".
+  b = b.replace(
+    /([^\s,(])(\s*\n\s*)(PRIMARY\s+KEY|UNIQUE|FOREIGN\s+KEY|CHECK|CONSTRAINT)\b/gi,
+    "$1,$2$3"
+  );
+
+  // (2) Drop a redundant table-level `PRIMARY KEY (...)` when one of the
+  //     column-defs already has an inline `PRIMARY KEY`. SQLite — and any
+  //     real DB — rejects "more than one primary key" outright. The user's
+  //     intent in this paste pattern is almost always the table-level
+  //     composite PK, but stripping THAT would lose information; we instead
+  //     drop the inline PRIMARY KEY on the surrogate id column. To do that
+  //     safely we'd have to parse the body — too aggressive. So we drop the
+  //     table-level PK only if the inline PK clearly belongs to a separate
+  //     surrogate (id-style) column. Heuristic: inline PK appears on a
+  //     column whose name doesn't appear in the table-level PK list.
+  const tablePkMatch = b.match(
+    /,\s*PRIMARY\s+KEY\s*\(([^)]+)\)(?=\s*(?:,|\)|$|\n))/i
+  );
+  if (tablePkMatch) {
+    const tablePkCols = new Set(
+      tablePkMatch[1]
+        .split(",")
+        .map((s) => s.trim().replace(/^[`"\[]|[`"\]]$/g, "").toLowerCase())
+        .filter(Boolean)
+    );
+    const inlinePkCol = b.match(
+      /(?:^|\s|,)([`"\[]?\w+[`"\]]?)\s+[^,]*?\bPRIMARY\s+KEY\b/i
+    );
+    if (inlinePkCol) {
+      const inlineName = inlinePkCol[1]
+        .replace(/^[`"\[]|[`"\]]$/g, "")
+        .toLowerCase();
+      if (!tablePkCols.has(inlineName)) {
+        // The inline PK is on a different column than the table-level PK.
+        // Strip the inline `PRIMARY KEY` keyword (keep the column itself
+        // and any AUTOINCREMENT will follow naturally as just an id field).
+        b = b.replace(
+          /(\s+)PRIMARY\s+KEY\b(?=[^,]*,)/i,
+          "$1"
+        );
+      }
+    }
+  }
+
+  return b;
 }
 
 function preprocessCommon(sql: string): string {
   let r = sql;
+  // Auto-repair common paste errors inside table bodies (missing comma
+  // before a table-level constraint, duplicate inline + table-level PK).
+  // Runs first so dialect-specific passes see a syntactically valid body.
+  r = autoRepairCreateTableBodies(r);
   // Strip server-level / connection-level statements that sql.js can't parse.
   r = r.replace(/^\s*SET\s+[^;]+;/gim, "");
   r = r.replace(/CREATE\s+EXTENSION[^;]+;/gi, "");
@@ -254,8 +425,66 @@ function preprocessMysql(sql: string): string {
   return r;
 }
 
+// Strips matches of `opener` (which must include the trailing `(` it opens)
+// along with the balanced paren block that follows. `trimAfter` returns the
+// number of chars to additionally consume immediately after the close paren —
+// e.g. for `GENERATED ALWAYS AS (…) STORED` we also consume " STORED".
+function stripBalanced(
+  src: string,
+  opener: RegExp,
+  open: string,
+  close: string,
+  trimAfter: (after: string) => number
+): string {
+  const parts: string[] = [];
+  let cursor = 0;
+  opener.lastIndex = 0;
+  for (let m: RegExpExecArray | null; (m = opener.exec(src)); ) {
+    const start = m.index;
+    let i = start + m[0].length;
+    if (src[i - 1] !== open) continue;
+    let depth = 1;
+    let inSingle = false;
+    let inDouble = false;
+    while (i < src.length && depth > 0) {
+      const c = src[i];
+      if (inSingle) {
+        if (c === "'") inSingle = false;
+      } else if (inDouble) {
+        if (c === '"') inDouble = false;
+      } else if (c === "'") inSingle = true;
+      else if (c === '"') inDouble = true;
+      else if (c === open) depth += 1;
+      else if (c === close) depth -= 1;
+      i += 1;
+    }
+    const consumedExtra = trimAfter(src.slice(i));
+    parts.push(src.slice(cursor, start));
+    cursor = i + consumedExtra;
+    opener.lastIndex = cursor;
+  }
+  parts.push(src.slice(cursor));
+  return parts.join("");
+}
+
 function preprocessPostgres(sql: string): string {
   let r = sql;
+  // NOTE: CREATE FUNCTION / TRIGGER / PROCEDURE / VIEW / etc. and the child
+  // CREATE TABLE … PARTITION OF … statements are filtered out at the
+  // statement level after splitting (see runnableStatement / parseInDialect).
+  // We do NOT regex-strip them here — a regex with `[\s\S]*?` between
+  // `CREATE TABLE` and `PARTITION OF` happily spans `;` boundaries and eats
+  // every preceding table along with the partition declaration.
+  // Strip the PARTITION BY clause that hangs after a parent table's closing
+  // paren so the parent's CREATE TABLE itself parses.
+  r = r.replace(/\)\s*PARTITION\s+BY\s+(?:HASH|RANGE|LIST)\s*\([^)]*\)/gi, ")");
+  // GENERATED ALWAYS AS (...) STORED — drop the whole expression so the column
+  // collapses to its base type. Use balanced-paren scanner since the
+  // expression body can contain arbitrarily nested function calls.
+  r = stripBalanced(r, /\bGENERATED\s+ALWAYS\s+AS\s*\(/gi, "(", ")", (after) => {
+    const m = after.match(/^\s*(?:STORED|VIRTUAL)\b/i);
+    return m ? m[0].length : 0;
+  });
   // Strip schema qualifiers like public.users
   r = r.replace(/\bpublic\./gi, "");
   // ::cast in expressions/defaults: '...'::text, NOW()::timestamp, ARRAY[...]::int[]
@@ -273,17 +502,37 @@ function preprocessPostgres(sql: string): string {
   r = r.replace(/\bTIMETZ\b/gi, "TIME");
   r = r.replace(/\bCHARACTER\s+VARYING\b/gi, "VARCHAR");
   r = r.replace(/\bDOUBLE\s+PRECISION\b/gi, "DOUBLE");
-  // Index/constraint trailers: USING gin, WITH (...), TABLESPACE x
+  // Postgres-only types sql.js' SQLite doesn't know — coerce to a parseable
+  // approximation. Schema shape is preserved; semantics aren't critical here.
+  r = r.replace(/\bTSVECTOR\b/gi, "TEXT");
+  r = r.replace(/\bTSQUERY\b/gi, "TEXT");
+  r = r.replace(/\bCITEXT\b/gi, "TEXT");
+  r = r.replace(/\bINET\b/gi, "TEXT");
+  r = r.replace(/\bCIDR\b/gi, "TEXT");
+  r = r.replace(/\bMACADDR\d*\b/gi, "TEXT");
+  r = r.replace(/\bMONEY\b/gi, "DECIMAL");
+  r = r.replace(/\bINTERVAL\b/gi, "TEXT");
+  r = r.replace(/\bXML\b/gi, "TEXT");
+  // Index/constraint trailers: USING gin, WITH (...), TABLESPACE x.
+  // NOTE: don't consume parentheses after USING — for `CREATE INDEX … USING
+  // GIN (col gin_trgm_ops)` the parens hold the index column list.
   r = r.replace(/\bUSING\s+\w+/gi, "");
   r = r.replace(/\bWITH\s*\([^)]*\)/gi, "");
   r = r.replace(/\bTABLESPACE\s+\w+/gi, "");
+  // Per-column operator class on PG indexes: `(username gin_trgm_ops)` →
+  // `(username)`. Strip `<ident>_ops` tokens inside parens.
+  r = r.replace(/(\b\w+)\s+\w+_ops\b/g, "$1");
+  // NULLS FIRST/LAST in index column lists — sql.js' SQLite doesn't support it.
+  r = r.replace(/\bNULLS\s+(?:FIRST|LAST)\b/gi, "");
   // Postgres-only DEFAULT functions sql.js doesn't know
   r = r.replace(/\bDEFAULT\s+nextval\s*\([^)]*\)/gi, "");
   r = r.replace(/\bDEFAULT\s+(?:gen_random_uuid|uuid_generate_v\d+)\s*\([^)]*\)/gi, "");
-  // Array type brackets — SQLite doesn't support arrays; drop the brackets.
+  r = r.replace(/\bDEFAULT\s+now\s*\(\s*\)/gi, "DEFAULT CURRENT_TIMESTAMP");
+  // Strip array brackets (UUID[], TEXT[], INTEGER[]) — convert to scalar.
   r = r.replace(/\[\s*\]/g, "");
   // COLLATE "default" / COLLATE pg_catalog.default
   r = r.replace(/\bCOLLATE\s+(?:"[^"]+"|[\w.]+)/gi, "");
+  // Partial-index predicate `WHERE …` is fine; SQLite supports it. Leave alone.
   return r;
 }
 
@@ -412,18 +661,67 @@ function getRows(result?: { columns: string[]; values: unknown[][] }) {
   });
 }
 
+// Per-statement parse warnings surfaced from `parseSqlToSchemaDetailed`.
+// `excerpt` is the first ~120 chars of the offending statement so the user
+// can locate it in their original input without re-running.
+export interface ImportWarning {
+  message: string;
+  excerpt: string;
+}
+
+export interface ParseResult {
+  schema: Schema;
+  warnings: ImportWarning[];
+  // Dialect actually used (auto-detection may pick a different one than the
+  // requested `dialect`).
+  dialect: "postgresql" | "mysql" | "sqlite" | "mssql";
+}
+
 export async function parseSqlToSchema(
   sql: string,
   dialect: SqlImportDialect = "auto"
 ): Promise<Schema> {
+  const result = await parseSqlToSchemaDetailed(sql, dialect);
+  return result.schema;
+}
+
+export async function parseSqlToSchemaDetailed(
+  sql: string,
+  dialect: SqlImportDialect = "auto"
+): Promise<ParseResult> {
   const trimmed = sql.trim();
   if (!trimmed) {
     throw new Error("SQL is empty.");
   }
 
-  const resolvedDialect: "postgresql" | "mysql" | "sqlite" | "mssql" =
-    dialect === "auto" ? detectDialect(trimmed) : dialect;
+  const detected = detectDialect(trimmed);
+  const primary: "postgresql" | "mysql" | "sqlite" | "mssql" =
+    dialect === "auto" ? detected : dialect;
 
+  // Try the requested (or auto-detected) dialect first. If it yields no
+  // tables, fall back through the remaining dialects so a misclick on the
+  // dialect tab doesn't leave the user staring at an unhelpful error.
+  const candidates: ("postgresql" | "mysql" | "sqlite" | "mssql")[] = [primary];
+  for (const d of [detected, "postgresql", "mysql", "mssql", "sqlite"] as const) {
+    if (!candidates.includes(d)) candidates.push(d);
+  }
+
+  let firstError: Error | null = null;
+  for (const candidate of candidates) {
+    try {
+      const out = await parseInDialect(trimmed, candidate);
+      return { schema: out.schema, warnings: out.warnings, dialect: candidate };
+    } catch (err) {
+      if (!firstError && err instanceof Error) firstError = err;
+    }
+  }
+  throw firstError ?? new Error("No tables could be parsed.");
+}
+
+async function parseInDialect(
+  trimmed: string,
+  resolvedDialect: "postgresql" | "mysql" | "sqlite" | "mssql"
+): Promise<{ schema: Schema; warnings: ImportWarning[] }> {
   const autoincMap = buildAutoincMap(trimmed);
   const cleaned = preprocessSql(trimmed, resolvedDialect);
 
@@ -435,20 +733,18 @@ export async function parseSqlToSchema(
   try {
     const statements = splitSqlStatements(cleaned);
     const errors: string[] = [];
+    const warnings: ImportWarning[] = [];
     for (const stmt of statements) {
       const trimmedStmt = stmt.trim();
       if (!trimmedStmt) continue;
-      // Only run statements relevant to schema introspection.
-      if (!/^(?:CREATE|ALTER)\s/i.test(trimmedStmt)) continue;
+      if (!isSchemaShapeStatement(trimmedStmt)) continue;
       try {
         db.run(trimmedStmt);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
-        errors.push(
-          `Skipped a statement (${msg}): ${trimmedStmt.slice(0, 120)}${
-            trimmedStmt.length > 120 ? "..." : ""
-          }`
-        );
+        const excerpt = `${trimmedStmt.slice(0, 120)}${trimmedStmt.length > 120 ? "…" : ""}`;
+        errors.push(`Skipped a statement (${msg}): ${excerpt}`);
+        warnings.push({ message: msg, excerpt });
       }
     }
 
@@ -599,7 +895,7 @@ export async function parseSqlToSchema(
       }
     }
 
-    return { tables, relations };
+    return { schema: { tables, relations }, warnings };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to parse SQL.";
     throw new Error(message);

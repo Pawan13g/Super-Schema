@@ -1,7 +1,9 @@
 import { NextRequest } from "next/server";
+import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { getDecryptedKey } from "@/lib/user-settings";
 import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { requireJsonContentType } from "@/lib/csrf";
 import {
   generateSchema,
   explainSchema,
@@ -18,8 +20,45 @@ import {
 // own provider key in a runaway loop.
 const RATE_OPTS = { windowMs: 60_000, max: 20 };
 
+// Hard caps applied at the API boundary. lib/langchain/ai.ts also clamps
+// per-field, but rejecting oversized payloads here keeps the request body
+// small and avoids parsing megabytes of attacker-controlled text.
+const MAX_FREE_TEXT_LEN = 8_000;
+const MAX_SCHEMA_JSON_LEN = 200_000;
+
+const ACTIONS = [
+  "generate_schema",
+  "explain_schema",
+  "fix_schema",
+  "generate_query",
+  "optimize_query",
+  "explain_query",
+  "document_schema",
+  "advise_indexes",
+] as const;
+
+// Per-action input shape. Validation rejects garbage / oversized fields
+// before any LLM cost is incurred. Each field is required by at least one
+// action; we model them as optional here and let the action handler pick
+// what it needs.
+const payloadSchema = z
+  .object({
+    description: z.string().max(MAX_FREE_TEXT_LEN).optional(),
+    schema: z.string().max(MAX_SCHEMA_JSON_LEN).optional(),
+    question: z.string().max(MAX_FREE_TEXT_LEN).optional(),
+    query: z.string().max(MAX_FREE_TEXT_LEN).optional(),
+  })
+  .strict();
+
+const bodySchema = z.object({
+  action: z.enum(ACTIONS),
+  payload: payloadSchema,
+});
+
 export async function POST(request: NextRequest) {
   try {
+    const csrfBlock = requireJsonContentType(request);
+    if (csrfBlock) return csrfBlock;
     const session = await auth();
     if (!session?.user?.id) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -70,11 +109,38 @@ export async function POST(request: NextRequest) {
       model: settings.model,
     };
 
-    const body = await request.json();
-    const { action, payload } = body as {
-      action: string;
-      payload: Record<string, string>;
+    let raw: unknown;
+    try {
+      raw = await request.json();
+    } catch {
+      return Response.json({ error: "Invalid JSON" }, { status: 400 });
+    }
+    const parsedBody = bodySchema.safeParse(raw);
+    if (!parsedBody.success) {
+      return Response.json(
+        {
+          error:
+            "Invalid request. Action must be a known string and each field must be under its size limit.",
+        },
+        { status: 400 }
+      );
+    }
+    const { action, payload } = parsedBody.data;
+
+    const required = (
+      field: "description" | "schema" | "question" | "query"
+    ): string | null => {
+      const v = payload[field];
+      if (typeof v !== "string" || v.trim().length === 0) {
+        return null;
+      }
+      return v;
     };
+    const missing = (field: string) =>
+      Response.json(
+        { error: `Missing required field: ${field}` },
+        { status: 400 }
+      );
 
     const startedAt = Date.now();
     const wrap = (result: unknown) =>
@@ -89,42 +155,59 @@ export async function POST(request: NextRequest) {
 
     switch (action) {
       case "generate_schema": {
-        const schema = await generateSchema(creds, payload.description);
+        const description = required("description");
+        if (description == null) return missing("description");
+        const schema = await generateSchema(creds, description);
         return wrap(schema);
       }
       case "explain_schema": {
-        const explanation = await explainSchema(creds, payload.schema);
+        const schemaStr = required("schema");
+        if (schemaStr == null) return missing("schema");
+        const explanation = await explainSchema(creds, schemaStr);
         return wrap(explanation);
       }
       case "fix_schema": {
-        const fixed = await fixSchema(creds, payload.schema);
+        const schemaStr = required("schema");
+        if (schemaStr == null) return missing("schema");
+        const fixed = await fixSchema(creds, schemaStr);
         return wrap(fixed);
       }
       case "generate_query": {
-        const query = await generateQuery(creds, payload.schema, payload.question);
+        const schemaStr = required("schema");
+        const question = required("question");
+        if (schemaStr == null) return missing("schema");
+        if (question == null) return missing("question");
+        const query = await generateQuery(creds, schemaStr, question);
         return wrap(query);
       }
       case "optimize_query": {
-        const optimized = await optimizeQuery(creds, payload.schema, payload.query);
+        const schemaStr = required("schema");
+        const queryStr = required("query");
+        if (schemaStr == null) return missing("schema");
+        if (queryStr == null) return missing("query");
+        const optimized = await optimizeQuery(creds, schemaStr, queryStr);
         return wrap(optimized);
       }
       case "explain_query": {
-        const explanation = await explainQuery(creds, payload.schema, payload.query);
+        const schemaStr = required("schema");
+        const queryStr = required("query");
+        if (schemaStr == null) return missing("schema");
+        if (queryStr == null) return missing("query");
+        const explanation = await explainQuery(creds, schemaStr, queryStr);
         return wrap(explanation);
       }
       case "document_schema": {
-        const docs = await documentSchema(creds, payload.schema);
+        const schemaStr = required("schema");
+        if (schemaStr == null) return missing("schema");
+        const docs = await documentSchema(creds, schemaStr);
         return wrap(docs);
       }
       case "advise_indexes": {
-        const suggestions = await adviseIndexes(creds, payload.schema);
+        const schemaStr = required("schema");
+        if (schemaStr == null) return missing("schema");
+        const suggestions = await adviseIndexes(creds, schemaStr);
         return wrap(suggestions);
       }
-      default:
-        return Response.json(
-          { error: `Unknown action: ${action}` },
-          { status: 400 }
-        );
     }
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

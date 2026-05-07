@@ -47,6 +47,7 @@ export function WorkspaceSwitcher() {
   const [renameId, setRenameId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const renameCancelledRef = useRef(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [anchor, setAnchor] = useState<{ left: number; top: number } | null>(
@@ -173,9 +174,19 @@ export function WorkspaceSwitcher() {
                           onClick={(e) => e.stopPropagation()}
                           onKeyDown={(e) => {
                             if (e.key === "Enter") handleRename(w.id);
-                            if (e.key === "Escape") { setRenameId(null); setRenameDraft(""); }
+                            if (e.key === "Escape") {
+                              renameCancelledRef.current = true;
+                              setRenameId(null);
+                              setRenameDraft("");
+                            }
                           }}
-                          onBlur={() => handleRename(w.id)}
+                          onBlur={() => {
+                            if (renameCancelledRef.current) {
+                              renameCancelledRef.current = false;
+                              return;
+                            }
+                            handleRename(w.id);
+                          }}
                           className="h-6 flex-1 text-xs"
                         />
                       ) : (

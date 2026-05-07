@@ -151,6 +151,15 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const lastSavedSchemaRef = useRef<string>("");
   const skipNextAutosaveRef = useRef(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Server-observed `version` of the currently-loaded schema. Sent on every
+  // PATCH as `expectedVersion` so the server can reject a save that would
+  // otherwise silently overwrite a concurrent edit (e.g. a second tab on
+  // the same schema). Updated on load and on each successful save.
+  const currentVersionRef = useRef<number | null>(null);
+  // Aborts every in-flight save request when the provider unmounts so a
+  // late-resolving fetch doesn't fire setState on a torn-down tree.
+  const unmountedRef = useRef(false);
+  const inFlightAbortersRef = useRef<Set<AbortController>>(new Set());
   // Always-current active schema id, readable inside async closures so a
   // late-resolving save can detect it should drop its result.
   const activeSchemaIdRef = useRef<string | null>(null);
@@ -200,11 +209,17 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           name: string;
           projectId: string;
           schemaJson: Schema;
+          version?: number;
         };
         project: { id: string; name: string };
       };
       skipNextAutosaveRef.current = true;
       lastSavedSchemaRef.current = JSON.stringify(data.schema.schemaJson);
+      // Snapshot the server-observed version so subsequent PATCHes carry an
+      // `expectedVersion`. If the server didn't send one (older API) we
+      // leave it null and fall back to last-write-wins for that session.
+      currentVersionRef.current =
+        typeof data.schema.version === "number" ? data.schema.version : null;
       replaceSchema(data.schema.schemaJson);
       setActiveSchemaId(id);
       activeSchemaIdRef.current = id;
@@ -696,19 +711,64 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
         }
 
         setSaveStatus("saving");
+        const aborter = new AbortController();
+        inFlightAbortersRef.current.add(aborter);
         try {
+          const expectedVersion = currentVersionRef.current;
           const res = await fetch(`/api/schemas/${targetSchemaId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ schemaJson: payloadSchema }),
+            body: JSON.stringify({
+              schemaJson: payloadSchema,
+              ...(expectedVersion != null ? { expectedVersion } : {}),
+            }),
+            signal: aborter.signal,
           });
 
           if (activeSchemaIdRef.current !== targetSchemaId) return false;
+
+          // 409 = optimistic-concurrency conflict. Another session bumped
+          // the version while we were editing. Reload the schema so the
+          // user sees the merged truth, drop our pending changes for that
+          // window, and surface a clear toast — silently overwriting would
+          // lose the other writer's work.
+          if (res.status === 409) {
+            setSaveStatus("error");
+            const data = (await res.json().catch(() => ({}))) as {
+              code?: string;
+              currentVersion?: number;
+            };
+            if (data.code === "VERSION_MISMATCH") {
+              toast.error(
+                "This schema was updated in another tab. Reloading…"
+              );
+              // Reload so currentVersionRef + canvas state realign with
+              // the server. Skip the next autosave so we don't immediately
+              // re-PATCH and clobber the freshly-loaded data.
+              await loadSchemaIntoCanvas(targetSchemaId);
+              return false;
+            }
+            if (opts.interactive) toast.error("Save failed");
+            return false;
+          }
 
           if (!res.ok) {
             setSaveStatus("error");
             if (opts.interactive) toast.error("Save failed");
             return false;
+          }
+
+          // Server returns the updated row including its new version.
+          // Track it so the next PATCH carries the right expected value.
+          try {
+            const data = (await res.clone().json()) as {
+              schema?: { version?: number };
+            };
+            if (typeof data?.schema?.version === "number") {
+              currentVersionRef.current = data.schema.version;
+            }
+          } catch {
+            /* ignore — version stays at last-known value */
           }
 
           lastSavedSchemaRef.current = serialized;
@@ -717,11 +777,22 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
           if (opts.interactive) toast.success("Saved");
           return true;
         } catch (err) {
+          // Aborted on unmount — skip state updates entirely (component is
+          // gone) and don't surface an error toast for it.
+          if (
+            err instanceof DOMException &&
+            err.name === "AbortError"
+          ) {
+            return false;
+          }
+          if (unmountedRef.current) return false;
           setSaveStatus("error");
           if (opts.interactive) {
             toast.error(err instanceof Error ? err.message : "Save failed");
           }
           return false;
+        } finally {
+          inFlightAbortersRef.current.delete(aborter);
         }
       })();
 
@@ -730,7 +801,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       });
       return run;
     },
-    []
+    [loadSchemaIntoCanvas]
   );
 
   // Drop the "saved" badge ~2.5s after the last successful save. Keeps the
@@ -741,7 +812,23 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(t);
   }, [saveStatus]);
 
-  // Debounced auto-save on schema change → save to active schema
+  // Debounced auto-save on schema change → save to active schema.
+  //
+  // Race-safety contract for the timer body:
+  //  1. `targetSchemaId` is snapshotted into a const at SCHEDULE time and
+  //     passed explicitly to `performSave(...)`. We do NOT rely on
+  //     `activeSchemaId` from the closure (that's effectively the same value
+  //     here, but spelling it out makes the intent obvious).
+  //  2. Inside the timer, we re-check `activeSchemaIdRef.current ===
+  //     targetSchemaId`. If the user switched schemas after the timer was
+  //     scheduled but before it fired, the guard bails. (cancelPendingSave
+  //     in the switch helpers normally clears the timer first; the guard
+  //     covers the edge case where it didn't.)
+  //  3. We read the latest schema state from `schemaRef.current` rather than
+  //     the closure-captured `schema`. If a synchronous mutation happens in
+  //     the same microtask the timer is dispatched in, this still saves the
+  //     freshest state. If the schema state was cleared by a switch (skip-
+  //     next set), the dedupe against `lastSavedSchemaRef` short-circuits.
   useEffect(() => {
     if (!activeSchemaId) return;
 
@@ -757,14 +844,38 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
     if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     const targetSchemaId = activeSchemaId;
     saveTimerRef.current = setTimeout(() => {
-      if (activeSchemaIdRef.current !== targetSchemaId) return;
-      void performSave(targetSchemaId, schema);
+      // Snapshot at fire-time so a later switch-then-edit-then-fire sequence
+      // can't leak edits into the wrong schema.
+      const stillActive = activeSchemaIdRef.current === targetSchemaId;
+      if (!stillActive) return;
+      const latestSchema = schemaRef.current;
+      void performSave(targetSchemaId, latestSchema);
     }, DEBOUNCE_MS);
 
     return () => {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
     };
   }, [schema, activeSchemaId, performSave]);
+
+  // Final cleanup on provider unmount — strict-mode mounts/unmounts in dev,
+  // route changes in production, etc. — to ensure neither the debounced
+  // timer nor any in-flight save fires setState on a torn-down tree.
+  useEffect(
+    () => () => {
+      unmountedRef.current = true;
+      if (saveTimerRef.current) {
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = null;
+      }
+      // Abort every save still on the wire. Their handlers see AbortError
+      // and bail without touching state.
+      for (const controller of inFlightAbortersRef.current) {
+        controller.abort();
+      }
+      inFlightAbortersRef.current.clear();
+    },
+    []
+  );
 
   // Force-flush any pending debounced save and PATCH the current schema
   // immediately. Used by the Ctrl/Cmd+S keyboard shortcut.

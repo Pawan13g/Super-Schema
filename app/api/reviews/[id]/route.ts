@@ -4,6 +4,8 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getSchemaIfOwned } from "@/lib/authz";
+import { parseSchemaJson } from "@/lib/schema-validate";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const decisionSchema = z.object({
   decision: z.enum(["approve", "reject"]),
@@ -46,6 +48,8 @@ export async function POST(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -77,7 +81,18 @@ export async function POST(
     return Response.json({ review: updated });
   }
 
-  // Approve = merge proposed schema into the live one.
+  // Approve = merge proposed schema into the live one. Validate the
+  // proposed JSON against the Schema shape BEFORE we mutate the live row;
+  // a malformed proposedJson would otherwise crash everything downstream
+  // (canvas render, SQL gen, diffing) for every reader of the schema.
+  const validated = parseSchemaJson(found.review.proposedJson);
+  if (!validated.ok) {
+    return Response.json(
+      { error: `Proposed schema is malformed: ${validated.error}` },
+      { status: 422 }
+    );
+  }
+
   const result = await prisma.$transaction(async (tx) => {
     const review = await tx.schemaReview.update({
       where: { id },
@@ -118,9 +133,11 @@ export async function POST(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

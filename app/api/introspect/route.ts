@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { checkRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { requireJsonContentType } from "@/lib/csrf";
 import {
   introspectDatabase,
   type IntrospectDialect,
@@ -17,6 +18,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -59,12 +62,29 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Outer wall-clock cap. The driver-level connect/query timeouts in
+  // db-introspect are 8 s + 15 s, so a healthy roundtrip easily fits in 25 s.
+  // We give the whole pipeline a hard 25 s ceiling so a misbehaving driver
+  // (DNS hang, half-closed TCP, partial TLS) can't keep the route alive
+  // indefinitely.
+  const OUTER_TIMEOUT_MS = 25_000;
+
   try {
     const startedAt = Date.now();
-    const schema = await introspectDatabase(
-      parsed.dialect,
-      parsed.connectionString
-    );
+    const schema = await Promise.race([
+      introspectDatabase(parsed.dialect, parsed.connectionString),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Introspection timed out after ${OUTER_TIMEOUT_MS / 1000}s. The database did not respond in time.`
+              )
+            ),
+          OUTER_TIMEOUT_MS
+        )
+      ),
+    ]);
     return Response.json({
       schema,
       meta: {
@@ -80,6 +100,7 @@ export async function POST(request: NextRequest) {
     // strip the connection string defensively just in case it appears in the
     // error (e.g. "could not connect to <full DSN>").
     const safe = message.replace(parsed.connectionString, "<connection>");
-    return Response.json({ error: safe }, { status: 502 });
+    const status = /timed out/i.test(message) ? 504 : 502;
+    return Response.json({ error: safe }, { status });
   }
 }

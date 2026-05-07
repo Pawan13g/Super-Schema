@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getProjectIfOwned } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 // POST = restore. Clears deletedAt on the project AND on every child schema
 // that was soft-deleted as part of the same cascade. We treat any child
@@ -9,9 +10,11 @@ import { getProjectIfOwned } from "@/lib/authz";
 // and bring it back. Schemas explicitly trashed before the project was sent
 // to the bin keep their state.
 export async function POST(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -46,9 +49,11 @@ export async function POST(
 
 // DELETE = permanent. Cascades through Prisma onDelete: Cascade.
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

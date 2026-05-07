@@ -71,6 +71,8 @@ export function SchemaSidebar() {
   const [renamingTableId, setRenamingTableId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
   const renameInputRef = useRef<HTMLInputElement>(null);
+  // Set by Escape handler so the trailing onBlur skips the commit.
+  const renameCancelledRef = useRef(false);
 
   // Tree expansion state per table — independent from selection. Persisted
   // as a string array (Set is not JSON-serializable).
@@ -418,10 +420,17 @@ export function SchemaSidebar() {
                         ref={renameInputRef}
                         value={renameDraft}
                         onChange={(e) => setRenameDraft(e.target.value)}
-                        onBlur={commitRename}
+                        onBlur={() => {
+                          if (renameCancelledRef.current) {
+                            renameCancelledRef.current = false;
+                            return;
+                          }
+                          commitRename();
+                        }}
                         onKeyDown={(e) => {
                           if (e.key === "Enter") commitRename();
                           if (e.key === "Escape") {
+                            renameCancelledRef.current = true;
                             setRenamingTableId(null);
                             setRenameDraft("");
                           }
@@ -1040,7 +1049,12 @@ function SelectedTablePanel({
             }
           >
             <SelectTrigger className="h-7 w-full text-[11px]">
-              <SelectValue placeholder="Choose column" />
+              <SelectValue placeholder="Choose column">
+                {(value: string | null) => {
+                  const c = tableColumns.find((x) => x.id === value);
+                  return c ? c.name : "Choose column";
+                }}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {tableColumns.map((column) => (

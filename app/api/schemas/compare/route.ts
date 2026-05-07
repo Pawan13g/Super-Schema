@@ -4,7 +4,8 @@ import { auth } from "@/lib/auth";
 import { getSchemaIfOwned } from "@/lib/authz";
 import { diffSchemas } from "@/lib/schema-diff";
 import { generateMigrationSql, type SqlDialect } from "@/lib/schema-migration";
-import type { Schema } from "@/lib/types";
+import { parseSchemaJson } from "@/lib/schema-validate";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const bodySchema = z.object({
   leftId: z.string().min(1),
@@ -13,6 +14,8 @@ const bodySchema = z.object({
 });
 
 export async function POST(request: NextRequest) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -41,11 +44,27 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Not found" }, { status: 404 });
   }
 
-  const leftSchema = left.schemaJson as unknown as Schema;
-  const rightSchema = right.schemaJson as unknown as Schema;
+  const leftParsed = parseSchemaJson(left.schemaJson);
+  const rightParsed = parseSchemaJson(right.schemaJson);
+  if (!leftParsed.ok) {
+    return Response.json(
+      { error: `Stored schema "${left.name}" is malformed: ${leftParsed.error}` },
+      { status: 422 }
+    );
+  }
+  if (!rightParsed.ok) {
+    return Response.json(
+      { error: `Stored schema "${right.name}" is malformed: ${rightParsed.error}` },
+      { status: 422 }
+    );
+  }
 
-  const diff = diffSchemas(leftSchema, rightSchema);
-  const migration = generateMigrationSql(leftSchema, rightSchema, dialect);
+  const diff = diffSchemas(leftParsed.schema, rightParsed.schema);
+  const migration = generateMigrationSql(
+    leftParsed.schema,
+    rightParsed.schema,
+    dialect
+  );
 
   return Response.json({
     left: { id: left.id, name: left.name, projectId: left.projectId },

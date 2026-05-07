@@ -8,7 +8,11 @@ import { generateSql, type SqlDialect } from "@/lib/sql-generator";
 import { generateModels, type ModelTarget } from "@/lib/model-generator";
 import { highlightSql } from "@/lib/sql-highlight";
 import { highlightCode } from "@/lib/code-highlight";
-import { parseSqlToSchema, type SqlImportDialect } from "@/lib/sql-import";
+import {
+  parseSqlToSchemaDetailed,
+  type ImportWarning,
+  type SqlImportDialect,
+} from "@/lib/sql-import";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -19,6 +23,7 @@ import { Tip } from "@/components/ui/tip";
 import { usePanelLayout } from "@/lib/panel-layout";
 import { QueryPanel } from "./query-panel";
 import { ProblemsPanel } from "./problems-panel";
+import { SqlCodeEditor } from "./sql-code-editor";
 import { VersionHistoryPanel } from "./version-history-panel";
 
 const VALID_TABS = ["sql", "models", "query", "import", "problems", "history"] as const;
@@ -56,6 +61,7 @@ export function SqlPreview() {
   );
   const [importSql, setImportSql] = useState("");
   const [importError, setImportError] = useState<string | null>(null);
+  const [importWarnings, setImportWarnings] = useState<ImportWarning[]>([]);
   const [importing, setImporting] = useState(false);
   const [importDialect, setImportDialect] = useState<SqlImportDialect>("auto");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -154,15 +160,26 @@ export function SqlPreview() {
   const handleImportSql = async () => {
     if (!importSql.trim() || importing) return;
     setImportError(null);
+    setImportWarnings([]);
     setImporting(true);
 
     try {
-      const nextSchema = await parseSqlToSchema(importSql, importDialect);
-      replaceSchema(nextSchema);
-      setActiveTab("sql");
-      toast.success(
-        `Imported ${nextSchema.tables.length} table${nextSchema.tables.length === 1 ? "" : "s"}`
-      );
+      const result = await parseSqlToSchemaDetailed(importSql, importDialect);
+      replaceSchema(result.schema);
+      setImportWarnings(result.warnings);
+      // Stay on the import tab when there were per-statement failures so
+      // the user can see what was skipped. Otherwise switch to SQL output.
+      setActiveTab(result.warnings.length > 0 ? "import" : "sql");
+      const tableCount = result.schema.tables.length;
+      const skipped = result.warnings.length;
+      const base = `Imported ${tableCount} table${tableCount === 1 ? "" : "s"}`;
+      if (skipped > 0) {
+        toast.warning(
+          `${base} — ${skipped} statement${skipped === 1 ? "" : "s"} skipped (see Import tab for details)`
+        );
+      } else {
+        toast.success(base);
+      }
     } catch (error) {
       const msg =
         error instanceof Error ? error.message : "Failed to import SQL.";
@@ -370,8 +387,13 @@ export function SqlPreview() {
           <QueryPanel />
         </TabsContent>
 
-        {/* SQL Import tab */}
-        <TabsContent value="import" className="flex-1 overflow-hidden">
+        {/* SQL Import tab — strict three-row flex layout so the editor in
+            the middle scrolls but the header (upload + dialect picker) and
+            footer (Clear / Import buttons + warnings) stay anchored. */}
+        <TabsContent
+          value="import"
+          className="flex min-h-0 flex-1 flex-col overflow-hidden"
+        >
           <input
             ref={fileInputRef}
             type="file"
@@ -379,77 +401,111 @@ export function SqlPreview() {
             onChange={handleFilePicked}
             className="hidden"
           />
-          <div className="flex h-full flex-col">
-            <div className="flex items-center justify-between gap-3 border-b px-3 py-2">
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={importing}
-                >
-                  <Upload className="size-3" />
-                  Upload .sql
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  or paste DDL below
-                </span>
-              </div>
-              <Tabs
-                value={importDialect}
-                onValueChange={(val) => setImportDialect(val as SqlImportDialect)}
-              >
-                <TabsList className="h-6">
-                  <TabsTrigger value="auto" className="text-[10px] px-2 h-5">
-                    Auto
-                  </TabsTrigger>
-                  <TabsTrigger value="postgresql" className="text-[10px] px-2 h-5">
-                    PostgreSQL
-                  </TabsTrigger>
-                  <TabsTrigger value="mysql" className="text-[10px] px-2 h-5">
-                    MySQL
-                  </TabsTrigger>
-                  <TabsTrigger value="sqlite" className="text-[10px] px-2 h-5">
-                    SQLite
-                  </TabsTrigger>
-                  <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
-                    SQL Server
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-            </div>
-            <div className="flex-1 p-3">
-              <SqlCodeEditor
-                value={importSql}
-                onChange={setImportSql}
+          {/* Header: wraps on small screens so the dialect tabs drop below
+              the upload button instead of overflowing horizontally. */}
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-2">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="xs"
+                onClick={() => fileInputRef.current?.click()}
                 disabled={importing}
-                placeholder="Paste SQL here..."
-              />
+              >
+                <Upload className="size-3" />
+                Upload .sql
+              </Button>
+              <span className="hidden text-xs text-muted-foreground sm:inline">
+                or paste DDL below
+              </span>
             </div>
-            <div className="flex items-center justify-between gap-2 border-t px-3 py-2">
-              <div className="line-clamp-2 text-[11px] text-destructive">
-                {importError ?? ""}
-              </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setImportSql("");
-                    setImportError(null);
-                  }}
-                  disabled={importing}
-                >
-                  Clear
-                </Button>
-                <Button
-                  size="sm"
-                  onClick={handleImportSql}
-                  disabled={importing || !importSql.trim()}
-                >
-                  {importing ? <Loader size="xs" /> : "Import to Canvas"}
-                </Button>
-              </div>
+            <Tabs
+              value={importDialect}
+              onValueChange={(val) => setImportDialect(val as SqlImportDialect)}
+              className="ml-auto"
+            >
+              <TabsList className="h-6 flex-wrap">
+                <TabsTrigger value="auto" className="text-[10px] px-2 h-5">
+                  Auto
+                </TabsTrigger>
+                <TabsTrigger value="postgresql" className="text-[10px] px-2 h-5">
+                  PG
+                </TabsTrigger>
+                <TabsTrigger value="mysql" className="text-[10px] px-2 h-5">
+                  MySQL
+                </TabsTrigger>
+                <TabsTrigger value="sqlite" className="text-[10px] px-2 h-5">
+                  SQLite
+                </TabsTrigger>
+                <TabsTrigger value="mssql" className="text-[10px] px-2 h-5">
+                  MSSQL
+                </TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
+
+          {/* Editor: `min-h-0` so flex-1 actually allows it to shrink within
+              the column; otherwise CodeMirror's content can push the
+              footer out of view as the user types more lines. */}
+          <div className="flex min-h-0 flex-1 p-3">
+            <SqlCodeEditor
+              value={importSql}
+              onChange={setImportSql}
+              disabled={importing}
+              placeholder="Paste SQL here..."
+              dialect={importDialect}
+            />
+          </div>
+
+          {importWarnings.length > 0 && (
+            <div className="max-h-40 shrink-0 overflow-y-auto border-t bg-amber-500/[0.04] px-3 py-2">
+              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                {importWarnings.length} statement
+                {importWarnings.length === 1 ? "" : "s"} skipped
+              </p>
+              <ul className="space-y-1">
+                {importWarnings.map((w, i) => (
+                  <li
+                    key={i}
+                    className="rounded-md border border-amber-500/30 bg-background px-2 py-1.5 text-[11px]"
+                  >
+                    <p className="font-medium text-amber-700 dark:text-amber-400">
+                      {w.message}
+                    </p>
+                    <pre className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                      {w.excerpt}
+                    </pre>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {/* Footer: shrink-0 + sticky-feeling layout. Wraps on narrow
+              viewports so error text and buttons don't overlap. */}
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t px-3 py-2">
+            <div className="line-clamp-2 min-w-0 flex-1 text-[11px] text-destructive">
+              {importError ?? ""}
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setImportSql("");
+                  setImportError(null);
+                  setImportWarnings([]);
+                }}
+                disabled={importing}
+              >
+                Clear
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleImportSql}
+                disabled={importing || !importSql.trim()}
+              >
+                {importing ? <Loader size="xs" /> : "Import to Canvas"}
+              </Button>
             </div>
           </div>
         </TabsContent>
@@ -473,66 +529,3 @@ export function SqlPreview() {
   );
 }
 
-interface SqlCodeEditorProps {
-  value: string;
-  onChange: (next: string) => void;
-  disabled?: boolean;
-  placeholder?: string;
-}
-
-function SqlCodeEditor({ value, onChange, disabled, placeholder }: SqlCodeEditorProps) {
-  const preRef = useRef<HTMLPreElement>(null);
-
-  const syncScroll = (e: React.UIEvent<HTMLTextAreaElement>) => {
-    if (preRef.current) {
-      preRef.current.scrollTop = e.currentTarget.scrollTop;
-      preRef.current.scrollLeft = e.currentTarget.scrollLeft;
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === "Tab") {
-      e.preventDefault();
-      const target = e.currentTarget;
-      const start = target.selectionStart;
-      const end = target.selectionEnd;
-      const next = value.substring(0, start) + "  " + value.substring(end);
-      onChange(next);
-      requestAnimationFrame(() => {
-        target.selectionStart = target.selectionEnd = start + 2;
-      });
-    }
-  };
-
-  return (
-    <div className="relative h-full w-full overflow-hidden rounded-md border bg-background focus-within:ring-1 focus-within:ring-ring">
-      <pre
-        ref={preRef}
-        aria-hidden
-        className="pointer-events-none absolute inset-0 m-0 overflow-hidden whitespace-pre p-2 font-mono text-xs leading-relaxed"
-      >
-        <code>
-          {value ? (
-            highlightSql(value)
-          ) : (
-            <span className="text-muted-foreground">{placeholder}</span>
-          )}
-        </code>
-      </pre>
-      <textarea
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        onScroll={syncScroll}
-        onKeyDown={handleKeyDown}
-        disabled={disabled}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
-        autoComplete="off"
-        wrap="off"
-        className="relative block h-full w-full resize-none overflow-auto whitespace-pre bg-transparent p-2 font-mono text-xs leading-relaxed text-transparent caret-foreground outline-none placeholder:text-transparent disabled:cursor-not-allowed"
-        style={{ WebkitTextFillColor: "transparent" }}
-      />
-    </div>
-  );
-}

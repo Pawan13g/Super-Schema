@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { userOwnsWorkspace } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const createSchema = z.object({
   workspaceId: z.string().min(1),
@@ -43,6 +44,8 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

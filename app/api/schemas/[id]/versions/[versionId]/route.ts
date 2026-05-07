@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getSchemaIfOwned } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 // GET /api/schemas/:id/versions/:versionId — get a specific version's full schema JSON
 export async function GET(

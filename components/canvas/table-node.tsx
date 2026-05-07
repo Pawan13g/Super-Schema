@@ -39,6 +39,9 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
   const [editing, setEditing] = useState(false);
   const [draftName, setDraftName] = useState(table.name);
   const inputRef = useRef<HTMLInputElement>(null);
+  // Set true by the Escape handler so the trailing onBlur (fired when the
+  // input unmounts) skips committing the partially-typed name.
+  const cancelledRef = useRef(false);
 
   useEffect(() => {
     if (editing) {
@@ -157,11 +160,18 @@ function TableNodeComponent({ data }: NodeProps & { data: TableNodeData }) {
             ref={inputRef}
             value={draftName}
             onChange={(e) => setDraftName(e.target.value)}
-            onBlur={commitRename}
+            onBlur={() => {
+              if (cancelledRef.current) {
+                cancelledRef.current = false;
+                return;
+              }
+              commitRename();
+            }}
             onKeyDown={(e) => {
               e.stopPropagation();
               if (e.key === "Enter") commitRename();
               if (e.key === "Escape") {
+                cancelledRef.current = true;
                 setDraftName(table.name);
                 setEditing(false);
               }

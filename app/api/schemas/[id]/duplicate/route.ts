@@ -3,6 +3,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getSchemaIfOwned } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 export async function POST(
   _request: NextRequest,

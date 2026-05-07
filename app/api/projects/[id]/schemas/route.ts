@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getProjectIfOwned } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),

@@ -4,7 +4,6 @@ import {
   createContext,
   useCallback,
   useContext,
-  useReducer,
   useRef,
   useState,
   type ReactNode,
@@ -58,6 +57,13 @@ interface SchemaStore {
   updateTableComment: (tableId: string, comment: string) => void;
   updateTableColor: (tableId: string, color: string) => void;
   addRelation: (relation: Omit<Relation, "id">) => void;
+  // Update an existing relation in place. Used for type cycling and endpoint
+  // edits so the underlying React Flow edge id stays stable (no flicker, no
+  // duplicate edge during the swap).
+  updateRelation: (
+    relationId: string,
+    updates: Partial<Omit<Relation, "id">>
+  ) => void;
   removeRelation: (relationId: string) => void;
   createJunctionTable: (
     sourceTableId: string,
@@ -155,13 +161,23 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   const [schema, setSchemaRaw] = useState<Schema>({ tables: [], relations: [] });
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
 
-  // History stacks (refs to avoid re-render storms; canUndo/canRedo derived
-  // through a tick counter that bumps when stacks change).
+  // History stacks (refs to avoid re-render storms). The boolean flags are
+  // tracked in state and updated alongside ref pushes so consumers can read
+  // `canUndo` / `canRedo` during render without violating the
+  // react-hooks/refs rule. Updates are no-ops when the value is unchanged
+  // so we don't trigger an extra render on every history-skipping mutation.
   const historyRef = useRef<{ past: Schema[]; future: Schema[] }>({
     past: [],
     future: [],
   });
-  const [, bumpHistory] = useReducer((c: number) => c + 1, 0);
+  const [canUndo, setCanUndoState] = useState(false);
+  const [canRedo, setCanRedoState] = useState(false);
+  const syncHistoryFlags = useCallback(() => {
+    const u = historyRef.current.past.length > 0;
+    const r = historyRef.current.future.length > 0;
+    setCanUndoState((prev) => (prev === u ? prev : u));
+    setCanRedoState((prev) => (prev === r ? prev : r));
+  }, []);
 
   const setSchema = useCallback(
     (
@@ -179,7 +195,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
           past.push(prev);
           if (past.length > HISTORY_LIMIT) past.shift();
           historyRef.current.future = [];
-          bumpHistory();
+          syncHistoryFlags();
         }
         return computed;
       });
@@ -194,7 +210,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
       const previous = past.pop()!;
       future.push(prev);
       if (future.length > HISTORY_LIMIT) future.shift();
-      bumpHistory();
+      syncHistoryFlags();
       return previous;
     });
   }, []);
@@ -206,13 +222,15 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
       const nextSchema = future.pop()!;
       past.push(prev);
       if (past.length > HISTORY_LIMIT) past.shift();
-      bumpHistory();
+      syncHistoryFlags();
       return nextSchema;
     });
   }, []);
 
-  const canUndo = historyRef.current.past.length > 0;
-  const canRedo = historyRef.current.future.length > 0;
+  // canUndo / canRedo are now driven by `setCanUndoState` /
+  // `setCanRedoState` calls inside `syncHistoryFlags`. Reading them is safe
+  // during render — they're regular state — and consumers re-render only
+  // when the flags actually flip.
 
   // Find a non-colliding name by appending "_N" if the requested name is
   // already taken in `taken`. Returns the requested name if unique.
@@ -242,24 +260,71 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const removeTable = useCallback((tableId: string) => {
-    setSchema((prev) => ({
-      tables: prev.tables.filter((t) => t.id !== tableId),
-      relations: prev.relations.filter(
-        (r) => r.sourceTable !== tableId && r.targetTable !== tableId
-      ),
-    }));
+    setSchema((prev) => {
+      const dropped = prev.tables.find((t) => t.id === tableId);
+      const droppedName = dropped?.name;
+      return {
+        ...prev,
+        relations: prev.relations.filter(
+          (r) => r.sourceTable !== tableId && r.targetTable !== tableId
+        ),
+        // Drop the table itself; on surviving tables strip any FK references
+        // that pointed at the deleted table (matched by name in the column's
+        // `references` field) so the column doesn't keep claiming to be a FK.
+        tables: prev.tables
+          .filter((t) => t.id !== tableId)
+          .map((t) => {
+            if (!droppedName) return t;
+            let touched = false;
+            const cols = t.columns.map((c) => {
+              if (c.references?.table === droppedName) {
+                touched = true;
+                return {
+                  ...c,
+                  references: undefined,
+                  constraints: c.constraints.filter((k) => k !== "REFERENCES"),
+                };
+              }
+              return c;
+            });
+            return touched ? { ...t, columns: cols } : t;
+          }),
+      };
+    });
     setSelectedTableId((prev) => (prev === tableId ? null : prev));
   }, []);
 
   const removeTables = useCallback((tableIds: string[]) => {
     if (tableIds.length === 0) return;
     const ids = new Set(tableIds);
-    setSchema((prev) => ({
-      tables: prev.tables.filter((t) => !ids.has(t.id)),
-      relations: prev.relations.filter(
-        (r) => !ids.has(r.sourceTable) && !ids.has(r.targetTable)
-      ),
-    }));
+    setSchema((prev) => {
+      const droppedNames = new Set(
+        prev.tables.filter((t) => ids.has(t.id)).map((t) => t.name)
+      );
+      return {
+        ...prev,
+        relations: prev.relations.filter(
+          (r) => !ids.has(r.sourceTable) && !ids.has(r.targetTable)
+        ),
+        tables: prev.tables
+          .filter((t) => !ids.has(t.id))
+          .map((t) => {
+            let touched = false;
+            const cols = t.columns.map((c) => {
+              if (c.references && droppedNames.has(c.references.table)) {
+                touched = true;
+                return {
+                  ...c,
+                  references: undefined,
+                  constraints: c.constraints.filter((k) => k !== "REFERENCES"),
+                };
+              }
+              return c;
+            });
+            return touched ? { ...t, columns: cols } : t;
+          }),
+      };
+    });
     setSelectedTableId((prev) => (prev && ids.has(prev) ? null : prev));
   }, []);
 
@@ -267,16 +332,35 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     setSchema((prev) => {
       const trimmed = name.trim();
       if (!trimmed) return prev;
+      const before = prev.tables.find((t) => t.id === tableId);
+      if (!before || before.name === trimmed) return prev;
       // Reject duplicate table names within the same schema.
       const collision = prev.tables.some(
         (t) => t.id !== tableId && t.name === trimmed
       );
       if (collision) return prev;
+      const oldName = before.name;
+      // Rewrite peer columns whose `references.table` pointed at the old
+      // name. Otherwise SQL gen would emit `REFERENCES <old-name>(...)` for
+      // a table that no longer exists under that name and the canvas FK
+      // arrow lookup (which compares on `references.table`) goes stale.
       return {
         ...prev,
-        tables: prev.tables.map((t) =>
-          t.id === tableId ? { ...t, name: trimmed } : t
-        ),
+        tables: prev.tables.map((t) => {
+          if (t.id === tableId) return { ...t, name: trimmed };
+          let touched = false;
+          const cols = t.columns.map((c) => {
+            if (c.references?.table === oldName) {
+              touched = true;
+              return {
+                ...c,
+                references: { ...c.references, table: trimmed },
+              };
+            }
+            return c;
+          });
+          return touched ? { ...t, columns: cols } : t;
+        }),
       };
     });
   }, []);
@@ -377,36 +461,73 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
 
   const updateColumn = useCallback(
     (tableId: string, columnId: string, updates: Partial<Column>) => {
-      setSchema((prev) => ({
-        ...prev,
-        tables: prev.tables.map((t) => {
-          if (t.id !== tableId) return t;
-          // Block renames that collide with another column in the same table.
-          // Other field updates pass through unchanged.
-          if (
-            typeof updates.name === "string" &&
-            updates.name.trim() &&
-            t.columns.some(
-              (c) => c.id !== columnId && c.name === updates.name?.trim()
-            )
-          ) {
-            const safe = { ...updates };
-            delete safe.name;
-            return {
-              ...t,
-              columns: t.columns.map((c) =>
-                c.id === columnId ? { ...c, ...safe } : c
-              ),
-            };
-          }
-          return {
-            ...t,
-            columns: t.columns.map((c) =>
-              c.id === columnId ? { ...c, ...updates } : c
-            ),
-          };
-        }),
-      }));
+      setSchema((prev) => {
+        const owningTable = prev.tables.find((t) => t.id === tableId);
+        const oldCol = owningTable?.columns.find((c) => c.id === columnId);
+        const trimmedName =
+          typeof updates.name === "string" ? updates.name.trim() : undefined;
+        // True iff this update is renaming the column to a different,
+        // non-empty name. Used below to decide whether to propagate the new
+        // name into peer columns' `references.column` strings.
+        const renaming =
+          trimmedName !== undefined &&
+          trimmedName.length > 0 &&
+          oldCol !== undefined &&
+          oldCol.name !== trimmedName &&
+          !owningTable!.columns.some(
+            (c) => c.id !== columnId && c.name === trimmedName
+          );
+        return {
+          ...prev,
+          tables: prev.tables.map((t) => {
+            if (t.id === tableId) {
+              // Block renames that collide with another column in the same
+              // table. Other field updates pass through unchanged.
+              if (
+                trimmedName !== undefined &&
+                t.columns.some(
+                  (c) => c.id !== columnId && c.name === trimmedName
+                )
+              ) {
+                const safe = { ...updates };
+                delete safe.name;
+                return {
+                  ...t,
+                  columns: t.columns.map((c) =>
+                    c.id === columnId ? { ...c, ...safe } : c
+                  ),
+                };
+              }
+              return {
+                ...t,
+                columns: t.columns.map((c) =>
+                  c.id === columnId ? { ...c, ...updates } : c
+                ),
+              };
+            }
+            // Other tables: if we just renamed a column, rewrite any
+            // inbound `references.column` that pointed at the old name. The
+            // table-name guard prevents collisions with same-named columns
+            // in unrelated tables.
+            if (!renaming || !owningTable || !oldCol) return t;
+            let touched = false;
+            const cols = t.columns.map((c) => {
+              if (
+                c.references?.table === owningTable.name &&
+                c.references.column === oldCol.name
+              ) {
+                touched = true;
+                return {
+                  ...c,
+                  references: { ...c.references, column: trimmedName! },
+                };
+              }
+              return c;
+            });
+            return touched ? { ...t, columns: cols } : t;
+          }),
+        };
+      });
     },
     []
   );
@@ -508,9 +629,61 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     const id = genId("rel");
     setSchema((prev) => ({
       ...prev,
-      relations: [...prev.relations, { ...relation, id }],
+      // A column can hold at most one outgoing FK. Drop any existing
+      // relation on the same (sourceTable, sourceColumn) before appending so
+      // editing a FK target doesn't leave a stale edge dangling.
+      relations: [
+        ...prev.relations.filter(
+          (r) =>
+            !(
+              r.sourceTable === relation.sourceTable &&
+              r.sourceColumn === relation.sourceColumn
+            )
+        ),
+        { ...relation, id },
+      ],
     }));
   }, []);
+
+  const updateRelation = useCallback(
+    (relationId: string, updates: Partial<Omit<Relation, "id">>) => {
+      const VALID_TYPES: Relation["type"][] = [
+        "one-to-one",
+        "one-to-many",
+        "many-to-many",
+      ];
+      // Validate type up front so a bad enum value can't sneak into state.
+      if (
+        updates.type !== undefined &&
+        !VALID_TYPES.includes(updates.type as Relation["type"])
+      ) {
+        return;
+      }
+      setSchema((prev) => {
+        const target = prev.relations.find((r) => r.id === relationId);
+        if (!target) return prev;
+        // Resolve the candidate endpoint values (either incoming or current)
+        // against the live tables/columns. If any reference doesn't resolve,
+        // bail rather than persist an orphan relation.
+        const nextSourceTable = updates.sourceTable ?? target.sourceTable;
+        const nextSourceColumn = updates.sourceColumn ?? target.sourceColumn;
+        const nextTargetTable = updates.targetTable ?? target.targetTable;
+        const nextTargetColumn = updates.targetColumn ?? target.targetColumn;
+        const sTable = prev.tables.find((t) => t.id === nextSourceTable);
+        const tTable = prev.tables.find((t) => t.id === nextTargetTable);
+        const sCol = sTable?.columns.find((c) => c.id === nextSourceColumn);
+        const tCol = tTable?.columns.find((c) => c.id === nextTargetColumn);
+        if (!sTable || !tTable || !sCol || !tCol) return prev;
+        return {
+          ...prev,
+          relations: prev.relations.map((r) =>
+            r.id === relationId ? { ...r, ...updates } : r
+          ),
+        };
+      });
+    },
+    [setSchema]
+  );
 
   const removeRelation = useCallback((relationId: string) => {
     setSchema((prev) => {
@@ -699,16 +872,24 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
     const GRID_Y = 250;
     const COLS = 3;
 
-    // Build tables with IDs
+    // Build tables with IDs. Dedupe table names — if the AI emits two tables
+    // with the same name we silently keep the first so we don't end up with
+    // colliding identifiers and broken FK lookups.
     const tableMap = new Map<string, string>(); // name → id
     const colMap = new Map<string, Map<string, string>>(); // tableName → (colName → colId)
+    const tableObjMap = new Map<string, Table>(); // tableId → Table
 
-    const tables: Table[] = generated.tables.map((t, i) => {
+    const tables: Table[] = [];
+    let tableIdx = 0;
+    for (const t of generated.tables) {
+      if (!t?.name || tableMap.has(t.name)) continue;
       const id = genId("tbl");
       tableMap.set(t.name, id);
       const colEntries = new Map<string, string>();
 
-      const columns: Column[] = t.columns.map((c) => {
+      const columns: Column[] = [];
+      for (const c of t.columns ?? []) {
+        if (!c?.name || colEntries.has(c.name)) continue; // dedupe column names
         const colId = genId("col");
         colEntries.set(c.name, colId);
         const colType = COLUMN_TYPES.includes(c.type as ColumnType)
@@ -717,25 +898,38 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         const constraints = (c.constraints ?? []).filter((cn) =>
           ["PRIMARY KEY", "NOT NULL", "UNIQUE", "AUTO_INCREMENT", "DEFAULT", "CHECK", "REFERENCES"].includes(cn)
         ) as ColumnConstraint[];
-        return { id: colId, name: c.name, type: colType, constraints, comment: "" };
-      });
+        columns.push({ id: colId, name: c.name, type: colType, constraints, comment: "" });
+      }
 
       colMap.set(t.name, colEntries);
 
-      return {
+      const tableObj: Table = {
         id,
         name: t.name,
-        color: TABLE_COLORS[i % TABLE_COLORS.length],
+        color: TABLE_COLORS[tableIdx % TABLE_COLORS.length],
         columns,
         indexes: [],
         comment: "",
-        position: { x: (i % COLS) * GRID_X + 50, y: Math.floor(i / COLS) * GRID_Y + 50 },
+        position: {
+          x: (tableIdx % COLS) * GRID_X + 50,
+          y: Math.floor(tableIdx / COLS) * GRID_Y + 50,
+        },
       };
-    });
+      tableObjMap.set(id, tableObj);
+      tables.push(tableObj);
+      tableIdx += 1;
+    }
 
-    // Build relations mapping names → IDs
+    // Build relations mapping names → IDs. Drops any relation whose source
+    // or target endpoint can't be resolved against the imported tables /
+    // columns; AI output is unreliable about that and the canvas edge
+    // renderer + SQL generator can't recover from a phantom id.
+    const fkSourceColIds = new Set<string>();
     const relations: Relation[] = (generated.relations ?? [])
       .map((r) => {
+        if (!r?.sourceTable || !r?.targetTable || !r?.sourceColumn || !r?.targetColumn) {
+          return null;
+        }
         const srcTableId = tableMap.get(r.sourceTable);
         const tgtTableId = tableMap.get(r.targetTable);
         const srcColId = colMap.get(r.sourceTable)?.get(r.sourceColumn);
@@ -744,6 +938,19 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         const relType = (["one-to-one", "one-to-many", "many-to-many"].includes(r.type)
           ? r.type
           : "one-to-many") as Relation["type"];
+        fkSourceColIds.add(srcColId);
+        // Wire the source column's `references` metadata so SQL gen can emit
+        // the FK clause and the column is consistently marked as a foreign key.
+        const srcTable = tableObjMap.get(srcTableId);
+        const tgtTable = tableObjMap.get(tgtTableId);
+        const srcCol = srcTable?.columns.find((c) => c.id === srcColId);
+        const tgtCol = tgtTable?.columns.find((c) => c.id === tgtColId);
+        if (srcCol && tgtTable && tgtCol) {
+          srcCol.references = { table: tgtTable.name, column: tgtCol.name };
+          if (!srcCol.constraints.includes("REFERENCES")) {
+            srcCol.constraints = [...srcCol.constraints, "REFERENCES"];
+          }
+        }
         return {
           id: genId("rel"),
           sourceTable: srcTableId,
@@ -754,6 +961,22 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         };
       })
       .filter((r): r is Relation => r !== null);
+
+    // Strip REFERENCES constraints on columns that don't have a matching
+    // surviving relation. Otherwise the column claims to be a foreign key
+    // but the canvas can't draw an edge for it and SQL gen produces an
+    // orphan-looking definition.
+    for (const tbl of tables) {
+      tbl.columns = tbl.columns.map((c) => {
+        if (!c.constraints.includes("REFERENCES")) return c;
+        if (fkSourceColIds.has(c.id)) return c;
+        return {
+          ...c,
+          constraints: c.constraints.filter((k) => k !== "REFERENCES"),
+          references: undefined,
+        };
+      });
+    }
 
     return { tables, relations };
   };
@@ -799,6 +1022,7 @@ export function SchemaProvider({ children }: { children: ReactNode }) {
         updateTableComment,
         updateTableColor,
         addRelation,
+        updateRelation,
         removeRelation,
         createJunctionTable,
         duplicateTable,

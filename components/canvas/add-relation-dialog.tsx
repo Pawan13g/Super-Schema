@@ -144,7 +144,16 @@ function DialogBody({
                         className="w-full text-xs"
                         disabled={!sourceTableObj}
                       >
-                        <SelectValue placeholder="Pick column" />
+                        <SelectValue placeholder="Pick column">
+                          {(value: string | null) => {
+                            const c = sourceTableObj?.columns.find(
+                              (x) => x.id === value
+                            );
+                            return c
+                              ? `${c.name} (${c.type.toLowerCase()})`
+                              : "Pick column";
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {sourceTableObj?.columns.map((c) => (
@@ -206,7 +215,16 @@ function DialogBody({
                         className="w-full text-xs"
                         disabled={!targetTableObj}
                       >
-                        <SelectValue placeholder="Pick column" />
+                        <SelectValue placeholder="Pick column">
+                          {(value: string | null) => {
+                            const c = targetTableObj?.columns.find(
+                              (x) => x.id === value
+                            );
+                            return c
+                              ? `${c.name} (${c.type.toLowerCase()})`
+                              : "Pick column";
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {targetTableObj?.columns.map((c) => (

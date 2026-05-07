@@ -2,6 +2,7 @@ import { NextRequest } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const createSchema = z.object({
   name: z.string().min(1).max(100),
@@ -29,6 +30,8 @@ export async function GET() {
 }
 
 export async function POST(request: NextRequest) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

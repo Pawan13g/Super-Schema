@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { auth } from "@/lib/auth";
+import { requireJsonContentType } from "@/lib/csrf";
 import {
   getPublicSettings,
   updateUserSettings,
@@ -36,6 +37,8 @@ export async function GET() {
 }
 
 export async function PUT(req: NextRequest) {
+  const csrfBlock = requireJsonContentType(req);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });

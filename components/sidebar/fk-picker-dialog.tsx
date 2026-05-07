@@ -84,7 +84,7 @@ function Body({
     schema.tables.find((t) => t.id !== sourceTableId)?.id ?? "";
   const initialTargetCol = schema.tables
     .find((t) => t.id === initialTargetTable)
-    ?.columns.find((c) => c.constraints.includes("PRIMARY KEY"))?.name;
+    ?.columns.find((c) => c.constraints.includes("PRIMARY KEY"))?.id;
 
   const form = useForm<FkFormValues>({
     resolver: zodResolver(fkFormSchema),
@@ -213,7 +213,16 @@ function Body({
                         className="w-full"
                         disabled={!targetTableObj}
                       >
-                        <SelectValue placeholder="Pick column" />
+                        <SelectValue placeholder="Pick column">
+                          {(value: string | null) => {
+                            const c = targetTableObj?.columns.find(
+                              (x) => x.id === value
+                            );
+                            return c
+                              ? `${c.name} (${c.type.toLowerCase()})`
+                              : "Pick column";
+                          }}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         {targetTableObj?.columns.map((c) => (

@@ -118,20 +118,27 @@ function generateInsertStatements(
   table: Table,
   allTables: Table[],
   schema: Schema,
-  rowCount: number
+  rowCount: number,
+  parentRowCounts: Map<string, number>
 ): string[] {
   const statements: string[] = [];
 
-  // Find FK columns that reference other tables
+  // Find FK columns and pin their `maxId` to the *actual* parent row count
+  // we already inserted (parent-first via topologicalSort). Earlier this
+  // was hard-coded to `rowCount`, which produced FK values pointing past
+  // the parent table when the parent had fewer rows — silently corrupt
+  // data in SQLite (no FK enforcement on by default) or visible failures
+  // elsewhere.
   const fkColumns = new Map<string, { tableName: string; maxId: number }>();
   for (const rel of schema.relations) {
     if (rel.sourceTable === table.id) {
       const targetTable = allTables.find((t) => t.id === rel.targetTable);
       const sourceCol = table.columns.find((c) => c.id === rel.sourceColumn);
       if (targetTable && sourceCol) {
+        const actualParent = parentRowCounts.get(targetTable.id) ?? 0;
         fkColumns.set(sourceCol.name, {
           tableName: targetTable.name,
-          maxId: rowCount,
+          maxId: actualParent,
         });
       }
     }
@@ -141,9 +148,12 @@ function generateInsertStatements(
     const colNames = table.columns.map((c) => `"${c.name}"`).join(", ");
     const values = table.columns
       .map((col) => {
-        // FK columns get random valid IDs
+        // FK columns: pick a valid parent id from [1..parentRowCount].
+        // If the parent has zero rows (cyclic graph, missing data), emit
+        // NULL so the row at least inserts cleanly when nullable.
         const fk = fkColumns.get(col.name);
         if (fk) {
+          if (fk.maxId === 0) return "NULL";
           return faker.number.int({ min: 1, max: fk.maxId });
         }
         return generateFakeValue(col, i);
@@ -165,6 +175,16 @@ export interface QueryResult {
   executionTimeMs: number;
 }
 
+// Hard caps so an accidental cartesian join + huge dataset can't lock the
+// browser tab. sql.js runs synchronously on the main thread; the only way
+// to truly interrupt it is `Worker.terminate()`. Until we move execution
+// into a Web Worker, these input bounds + a soft post-execution warning
+// are the practical guardrail.
+const MAX_ROWS_PER_TABLE = 500;
+const MAX_TOTAL_INSERT_ROWS = 5_000;
+const MAX_QUERY_LEN = 10_000;
+const SOFT_EXEC_WARN_MS = 5_000;
+
 export async function runMockQuery(
   schema: Schema,
   query: string,
@@ -174,6 +194,24 @@ export async function runMockQuery(
   const validation = validateQuery(query);
   if (!validation.valid) {
     throw new Error(validation.error);
+  }
+
+  // Bound the query and the dataset size BEFORE any heavy work so a runaway
+  // request fails fast with a clear error instead of pinning the tab.
+  if (query.length > MAX_QUERY_LEN) {
+    throw new Error(
+      `Query is too long (${query.length} chars). Max ${MAX_QUERY_LEN}.`
+    );
+  }
+  const safeRowsPerTable = Math.max(
+    1,
+    Math.min(rowsPerTable, MAX_ROWS_PER_TABLE)
+  );
+  const tableCount = schema.tables.length;
+  if (tableCount * safeRowsPerTable > MAX_TOTAL_INSERT_ROWS) {
+    throw new Error(
+      `Mock dataset would exceed ${MAX_TOTAL_INSERT_ROWS} rows (${tableCount} tables × ${safeRowsPerTable} rows). Reduce rows-per-table.`
+    );
   }
 
   // Init sql.js
@@ -190,30 +228,47 @@ export async function runMockQuery(
       db.run(stmt + ";");
     }
 
-    // Sort tables: insert referenced tables first (simple topological sort)
+    // Sort tables: insert referenced tables first (simple topological sort).
+    // Track the actual rowsPerTable count we successfully inserted so child
+    // tables can pick FK values from the real parent id range, not the
+    // hard-coded `rowCount` that used to produce orphan FKs when a parent
+    // table inserted fewer rows than configured.
     const tableOrder = topologicalSort(schema);
+    const parentRowCounts = new Map<string, number>();
 
-    // Generate and insert mock data
     for (const table of tableOrder) {
       const inserts = generateInsertStatements(
         table,
         schema.tables,
         schema,
-        rowsPerTable
+        safeRowsPerTable,
+        parentRowCounts
       );
+      let inserted = 0;
       for (const insert of inserts) {
         try {
           db.run(insert);
+          inserted += 1;
         } catch {
-          // Skip failed inserts (FK violations on random data)
+          // Skip failed inserts (FK violations on random data) — but the
+          // counter only credits rows that actually landed.
         }
       }
+      parentRowCounts.set(table.id, inserted);
     }
 
     // Run the query
     const start = performance.now();
     const results = db.exec(query);
     const executionTimeMs = Math.round((performance.now() - start) * 100) / 100;
+    if (executionTimeMs > SOFT_EXEC_WARN_MS) {
+      // sql.js is synchronous; we can't kill mid-execution from outside.
+      // Surfacing the slow run in the response lets the UI tell the user
+      // their query is expensive even though it ran to completion.
+      console.warn(
+        `runMockQuery: slow query (${executionTimeMs}ms): ${query.slice(0, 80)}…`
+      );
+    }
 
     if (results.length === 0) {
       return { columns: [], rows: [], rowCount: 0, executionTimeMs };

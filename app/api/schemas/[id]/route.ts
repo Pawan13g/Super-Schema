@@ -4,6 +4,7 @@ import { Prisma } from "@prisma/client";
 import { auth } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { getSchemaIfOwned } from "@/lib/authz";
+import { requireJsonContentType } from "@/lib/csrf";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(100).optional(),
@@ -13,6 +14,12 @@ const patchSchema = z.object({
       relations: z.array(z.unknown()),
     })
     .optional(),
+  // Optimistic-concurrency token. Clients should send the `version` they
+  // last observed (from GET / from a prior PATCH response) so this PATCH
+  // is rejected with 409 if the row was updated by someone else in the
+  // meantime. Omitting it preserves the legacy last-write-wins behaviour
+  // for clients that haven't been updated yet.
+  expectedVersion: z.number().int().nonnegative().optional(),
 });
 
 // Stable JSON serialization with sorted object keys, so two semantically
@@ -77,6 +84,8 @@ export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
@@ -91,6 +100,30 @@ export async function PATCH(
     const parsed = patchSchema.safeParse(body);
     if (!parsed.success) {
       return Response.json({ error: "Invalid input" }, { status: 400 });
+    }
+
+    // Optimistic-concurrency check (If-Match semantics). When the client
+    // sent us the version it last observed, reject the PATCH if the stored
+    // row has moved on. This prevents two browser tabs from silently
+    // overwriting each other's edits — last-write-wins is dangerous when
+    // the user can't see the other tab's changes.
+    //
+    // Returning 409 + the current row lets the client surface a "your edit
+    // is out of date" UX and merge or discard.
+    if (
+      parsed.data.expectedVersion !== undefined &&
+      parsed.data.expectedVersion !== owned.version
+    ) {
+      return Response.json(
+        {
+          error:
+            "This schema has changed since you loaded it. Refresh to see the latest version, then re-apply your edits.",
+          code: "VERSION_MISMATCH",
+          currentVersion: owned.version,
+          updatedAt: owned.updatedAt,
+        },
+        { status: 409 }
+      );
     }
 
     // Detect whether the incoming JSON differs from what's already stored.
@@ -127,7 +160,33 @@ export async function PATCH(
       }
     }
 
-    const schema = await prisma.schema.update({ where: { id }, data });
+    // Close the read-then-write window: when the client sent
+    // `expectedVersion` we use a conditional `updateMany(where: id+version)`
+    // so a concurrent writer that bumped `version` between our check above
+    // and the write here causes 0 rows to update, which we map to 409.
+    let schema;
+    if (parsed.data.expectedVersion !== undefined) {
+      const updated = await prisma.schema.updateMany({
+        where: { id, version: parsed.data.expectedVersion },
+        data: data as Prisma.SchemaUpdateManyMutationInput,
+      });
+      if (updated.count === 0) {
+        const fresh = await prisma.schema.findUnique({ where: { id } });
+        return Response.json(
+          {
+            error:
+              "This schema was updated by someone else while you were editing. Refresh to see the latest version, then re-apply your edits.",
+            code: "VERSION_MISMATCH",
+            currentVersion: fresh?.version ?? null,
+            updatedAt: fresh?.updatedAt ?? null,
+          },
+          { status: 409 }
+        );
+      }
+      schema = await prisma.schema.findUniqueOrThrow({ where: { id } });
+    } else {
+      schema = await prisma.schema.update({ where: { id }, data });
+    }
 
     // Snapshot only on structural change (skip pure position drags +
     // no-op PATCHes), capped at 50 versions per schema.
@@ -177,9 +236,11 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  _request: NextRequest,
+  request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
+  const csrfBlock = requireJsonContentType(request);
+  if (csrfBlock) return csrfBlock;
   const session = await auth();
   if (!session?.user?.id) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
